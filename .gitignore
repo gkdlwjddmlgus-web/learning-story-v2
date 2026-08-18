@@ -3,3 +3,26 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 .env
+
+# Local secrets
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local backup / snapshot
+backups/
+learning_story_v2_snapshot*.zip
+
+# Local development history
+scripts/archive/
+scripts/migrations/archive/
+docs/archive/
+docs/cleanup/
+
+# Logs
+*.log
