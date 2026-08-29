@@ -3,6 +3,7 @@ import traceback
 
 import streamlit as st
 
+from services.ai_client import AIQuotaExhausted
 from services.dev_config import generation_mode_label, is_ai_mock_enabled
 
 from components.theme_system import (
@@ -201,6 +202,12 @@ def render_guide_naming(
             )
 
             st.rerun()
+
+        except AIQuotaExhausted:
+            st.error(
+                "고양이 이름은 저장되었습니다. Gemini의 일일 무료 요청 할당량이 소진되어 "
+                "Story 생성을 중단했습니다. 할당량이 갱신된 뒤 저장된 상태에서 다시 시도할 수 있습니다."
+            )
 
         except Exception as exc:
             traceback.print_exc()

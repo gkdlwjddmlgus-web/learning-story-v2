@@ -15,10 +15,15 @@ from repositories.story_repository import (
 from services.ai_client import DEFAULT_MODEL
 from services.dev_config import generation_provider
 from services.generation_gateway import generate_json
+from services.experience_profile_service import (
+    build_curriculum_pedagogy_rules,
+    build_story_pedagogy_rules,
+    get_theme_experience_profile,
+)
 
 
-CURRICULUM_PROMPT_VERSION = "curriculum_v2"
-BLUEPRINT_PROMPT_VERSION = "blueprint_v2"
+CURRICULUM_PROMPT_VERSION = "curriculum_v3_pedagogy"
+BLUEPRINT_PROMPT_VERSION = "blueprint_v3_theme_arc"
 
 CURRICULUM_SCHEMA = {
     "type": "object",
@@ -191,6 +196,8 @@ def _ensure_curriculum(
     ):
         return curriculum_row["curriculum"]
 
+    curriculum_pedagogy = build_curriculum_pedagogy_rules(world[3])
+
     prompt = f"""
 너는 범용 학습 서비스의 Curriculum Architect다.
 
@@ -198,13 +205,17 @@ def _ensure_curriculum(
 학습 목표: {world[2] or "별도 목표 없음"}
 현재 수준: {world[3]}
 
+{curriculum_pedagogy}
+
 다음 기준으로 실제 학습 Curriculum을 설계한다.
 - 특정 분야에 종속된 고정 템플릿을 쓰지 않는다.
 - 학습 대분류와 실제 Concept을 정확한 현실 용어로 작성한다.
 - 권장 순서와 초기 난이도를 제공한다.
 - Concept는 Story Generator, Question Generator, Learning Analyzer가 함께 사용할 기준이다.
 - Story 세계관 용어로 Concept 이름을 바꾸지 않는다.
-- 사용자의 현재 수준과 목표를 반영한다.
+- 사용자의 현재 수준과 목표를 Concept 순서와 출발점에 직접 반영한다.
+- 각 Concept description에는 "무엇을 배우는지"를 현재 수준에서 이해할 수 있는 말로 쓴다.
+- 앞 Concept를 배우지 않고 뒤 Concept를 알아야만 이해되는 역전된 순서를 만들지 않는다.
 - 기초부터 응용까지 이어지는 5~24개의 Concept sequence를 만든다.
 
 JSON만 반환한다.
@@ -251,6 +262,8 @@ def _ensure_blueprint(
         return arc["blueprint"]
 
     theme_rules = get_theme_prompt_rules(world[4])
+    theme_profile = get_theme_experience_profile(world[4])
+    story_pedagogy = build_story_pedagogy_rules(world[3])
 
     prompt = f"""
 너는 완결형 Story Blueprint Designer다.
@@ -262,6 +275,12 @@ Theme: {world[4]}
 
 Theme 규칙:
 {theme_rules}
+
+Theme Story 전개 가이드:
+{theme_profile['arc_guidance']}
+{theme_profile['writer_rules']}
+
+{story_pedagogy}
 
 Curriculum 요약:
 {json.dumps(curriculum, ensure_ascii=False)}
@@ -278,7 +297,8 @@ Curriculum 요약:
 - 실제 학습 Concept을 마법/주문/게임 자원으로 억지 치환하지 않는다.
 - 동료 고양이는 전문 교사가 아니라 사용자의 고정 동료다.
 - 미스터리라면 hidden_truth에 사건의 핵심 진실/원인/동기를 처음부터 고정한다.
-- 미스터리가 아니라면 hidden_truth는 빈 문자열이다.
+- 다른 Theme은 hidden_truth를 빈 문자열로 두되, 위 Theme Story 전개 가이드에 맞는 장기 목표와 결말 규칙을 phase_goals에 반영한다.
+- Theme이 달라도 모든 Chapter가 "증거 조사"처럼 보이지 않게 한다.
 
 JSON만 반환한다.
 """

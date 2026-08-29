@@ -1,11 +1,27 @@
+# DAY5_EVENT_FLUSH_FIX_V1
 import streamlit as st
+
+from components.world_intro_cinematic import (
+    render_world_intro_naming,
+    render_world_intro_post,
+    should_render_world_intro_post,
+)
 
 from components.styles import (
     apply_global_styles,
 )
+from components.story_cinematic import (
+    should_render_story_cinematic,
+)
+from components.learning_compact_ui import (
+    render_compact_app_header,
+)
 from components.theme_system import (
     apply_theme_styles,
     get_theme_pack,
+)
+from repositories.chapter_repository import (
+    get_chapter,
 )
 from services.event_service import (
     flush_events,
@@ -34,26 +50,23 @@ def render_main(
         world[4]
     )
 
+    # DAY5_WORLD_INTRO_CINEMATIC_V1_MAIN_GATE
     if (
         len(world) <= 9
         or not world[9]
     ):
-        render_guide_naming(
+        render_world_intro_naming(
             user=user,
             world=world,
         )
         return
 
-    pack = get_theme_pack(
-        world[4]
-    )
-
-    st.title(
-        "Learning Story"
-    )
-    st.caption(
-        f"{user['display_name']}님 · {pack['identity']}"
-    )
+    if should_render_world_intro_post(world):
+        render_world_intro_post(
+            user=user,
+            world=world,
+        )
+        return
 
     queue_once(
         key=(
@@ -65,6 +78,37 @@ def render_main(
         metadata={
             "theme": world[4],
         },
+        flush=True,
+    )
+
+    # DAY5_STORY_CINEMATIC_V2_MAIN_GATE
+    # 최초 Story Cinematic은 Learning Story 제목/탭/로그아웃보다 먼저 전용 화면을 소유한다.
+    chapter = get_chapter(
+        world_id=world[0],
+        chapter_number=world[7],
+    )
+    if (
+        chapter is not None
+        and should_render_story_cinematic(
+            chapter_id=chapter[0],
+            story_text=chapter[4],
+        )
+    ):
+        render_learning_tab(
+            user=user,
+            world=world,
+        )
+        return
+
+    pack = get_theme_pack(
+        world[4]
+    )
+
+    # DAY5_COMPACT_LEARNING_UI_V1_MAIN
+    render_compact_app_header(
+        theme=world[4],
+        user_name=f"{user['display_name']}님",
+        identity=pack["identity"],
     )
 
     learn_tab, world_tab, record_tab = (

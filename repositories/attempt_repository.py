@@ -229,3 +229,27 @@ def get_attempted_question_texts(
         for row in rows
         if row[0]
     }
+
+
+def get_latest_attempted_chapter_number(
+    user_id: int,
+    world_id: int,
+) -> int | None:
+    """현재 World에서 실제 답안을 가장 최근 제출한 Chapter 번호."""
+    pool = get_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select c.chapter_number
+                from public.v2_question_attempts a
+                join public.v2_chapters c on c.id = a.chapter_id
+                where a.user_id = %s
+                  and a.world_id = %s
+                order by a.id desc
+                limit 1
+                """,
+                (user_id, world_id),
+            )
+            row = cur.fetchone()
+    return int(row[0]) if row else None

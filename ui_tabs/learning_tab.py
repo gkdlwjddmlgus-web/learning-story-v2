@@ -1,6 +1,8 @@
+# DAY5_EVENT_FLUSH_FIX_V1
 from __future__ import annotations
 
 import hashlib
+import logging
 import html
 import re
 import time
@@ -8,6 +10,22 @@ import traceback
 
 import streamlit as st
 
+from components.learning_compact_ui import (
+    render_compact_chapter_header,
+)
+from components.investigation_board import (
+    ACTION_CLUE,
+    ACTION_COMPANION,
+    ACTION_DEDUCE,
+    clear_investigation_question_state,
+    clear_investigation_state,
+    render_investigation_board,
+    set_investigation_action,
+)
+from components.story_cinematic import (
+    render_story_experience,
+    should_render_story_cinematic,
+)
 from components.text_utils import (
     format_inline_text,
 )
@@ -31,13 +49,21 @@ from repositories.story_choice_repository import (
 from repositories.world_repository import (
     update_current_chapter,
 )
+from services.ai_client import AIQuotaExhausted
 from services.dev_config import generation_mode_label, is_ai_mock_enabled
 from services.event_service import (
     queue_event,
     queue_once,
 )
+from services.experience_profile_service import (
+    get_learner_level_profile,
+    get_reasoning_profile,
+    get_theme_experience_profile,
+    get_ui_support_mode,
+)
 from services.mastery_service import (
     choose_requested_difficulty,
+    get_adaptive_support_profile,
     update_mastery_from_attempt,
 )
 from services.personalization_service import (
@@ -56,6 +82,7 @@ from services.story_engine_service import (
     complete_current_story_arc,
     ensure_initial_story_block,
     generate_next_story_block,
+    get_chapter_interaction_context,
     is_story_block_end,
     is_story_complete,
 )
@@ -64,6 +91,8 @@ from services.story_engine_service import (
 CHAPTER_STORY_CHOICES = 9
 CHAPTER_PHASE = 10
 CHAPTER_TARGET_CONCEPTS = 11
+
+LOGGER = logging.getLogger(__name__)
 
 USER_REPLY_TEMPLATES = {
     "동화": (
@@ -107,6 +136,7 @@ USER_REPLY_TEMPLATES = {
 def reset_quiz_state() -> None:
     st.session_state.question_index = 0
     st.session_state.question_submitted = False
+    clear_investigation_state()
 
     for key in (
         "selected_answer",
@@ -300,35 +330,98 @@ def _render_learning_note(
 
 def _format_choice_reply(
     *,
-    theme: str,
     choice_number: int,
-    variation_key: str,
+    choice_text: str,
 ) -> str:
-    templates = USER_REPLY_TEMPLATES.get(
-        theme,
-        (
-            "나는 {number}번이라고 생각해.",
-            "음... {number}번?",
-            "{number}번 같아.",
-            "내 답은 {number}번이야.",
-            "{number}번으로 할게.",
-        ),
+    """사용자 답변은 추론을 대신 말하지 않고 선택 사실만 중립적으로 보여준다."""
+    clean = _sanitize_learning_text(choice_text)
+    clean = re.sub(
+        r"^\s*(?:[①②③④]|\(?[1-4]\)?[.)]|[1-4]\s*번[.)]?)\s*",
+        "",
+        clean,
+    ).strip()
+    if len(clean) > 110:
+        clean = clean[:107].rstrip() + "..."
+    return f"{choice_number}번 · {clean}"
+
+
+def _render_learning_materials(
+    *,
+    theme: str,
+    learner_level: str,
+    difficulty: str,
+    question: dict,
+    section: str = "all",
+) -> None:
+    # DAY5_INVESTIGATION_BOARD_V1_INTEGRATION
+    if section not in {"all", ACTION_CLUE, ACTION_COMPANION}:
+        raise ValueError(f"Unsupported learning material section: {section}")
+    profile = get_theme_experience_profile(theme)
+    support = get_learner_level_profile(learner_level)
+    reasoning = get_reasoning_profile(difficulty)
+    ui_mode = get_ui_support_mode(learner_level)
+
+    concept_brief = _sanitize_learning_text(
+        question.get("concept_brief")
+    )
+    evidence_summary = _sanitize_learning_text(
+        question.get("evidence_summary")
+    )
+    evidence_context = _sanitize_learning_text(
+        question.get("evidence_context")
+    )
+    evidence_help = _sanitize_learning_text(
+        question.get("evidence_help")
     )
 
-    digest = hashlib.sha256(
-        variation_key.encode(
-            "utf-8"
-        )
-    ).digest()
+    if concept_brief and section in {"all", ACTION_COMPANION}:
+        if ui_mode in {"guided", "supported"}:
+            with st.container(border=True):
+                st.markdown("**💡 먼저 알아둘 개념**")
+                st.markdown(
+                    f"<div style='font-size:1.02rem;line-height:1.75;'>"
+                    f"{html.escape(concept_brief)}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    f"{support['display_name']} · 사고 수준 {reasoning['label']}"
+                )
+        else:
+            with st.expander("💡 필요하면 개념 도움 보기", expanded=False):
+                st.write(concept_brief)
 
-    template = templates[
-        digest[0]
-        % len(templates)
-    ]
+    if evidence_summary and section in {"all", ACTION_CLUE}:
+        with st.container(border=True):
+            st.markdown(f"**{profile['summary_label']}**")
+            st.markdown(
+                f"<div style='font-size:1.06rem;line-height:1.85;"
+                f"font-weight:650;'>{html.escape(evidence_summary)}</div>",
+                unsafe_allow_html=True,
+            )
 
-    return template.format(
-        number=choice_number,
-    )
+    if evidence_context and section in {"all", ACTION_CLUE}:
+        if ui_mode in {"guided", "supported"}:
+            with st.expander(
+                f"{profile['source_label']} · 상세 보기",
+                expanded=True,
+            ):
+                st.markdown(
+                    f"<div style='font-size:1rem;line-height:1.8;'>"
+                    f"{html.escape(evidence_context)}</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            with st.container(border=True):
+                st.markdown(f"**{profile['source_label']}**")
+                st.markdown(
+                    f"<div style='font-size:1rem;line-height:1.8;'>"
+                    f"{html.escape(evidence_context)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+    if evidence_help and section in {"all", ACTION_COMPANION}:
+        with st.expander(profile["help_label"], expanded=False):
+            st.write(evidence_help)
 
 
 def _render_chapter_story(
@@ -336,7 +429,7 @@ def _render_chapter_story(
     user,
     world,
     chapter,
-) -> None:
+) -> bool:
     pack = get_theme_pack(
         world[4]
     )
@@ -388,71 +481,49 @@ def _render_chapter_story(
         + 1
     )
 
-    st.markdown(
-        f"""
-        <div class="chapter-heading">
-            <div class="chapter-kicker">
-                CHAPTER {chapter[2]} · BLOCK {block_number}
-            </div>
-            <div class="chapter-title">
-                {html.escape(format_inline_text(chapter[3]))}
-            </div>
-            <div class="chapter-meta">
-                {html.escape(phase_label)} ·
-                {html.escape(str(world[4]))} ·
-                {html.escape(str(world[1]))}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if total:
-        st.markdown(
-            '<div class="story-progress-shell">',
-            unsafe_allow_html=True,
-        )
-        st.progress(
-            min(
-                1.0,
-                chapter[2]
-                / float(total),
-            ),
-            text=(
-                f"Story 진행 · "
-                f"{chapter[2]} / {total}"
-            ),
-        )
-        st.markdown(
-            "</div>",
-            unsafe_allow_html=True,
+    # DAY5_STORY_CINEMATIC_V2_DEDICATED_INTEGRATION
+    # Cinematic이 필요한 동안에는 Chapter heading/progress/학습 UI보다 먼저 화면을 독점한다.
+    if should_render_story_cinematic(
+        chapter_id=chapter[0],
+        story_text=chapter[4],
+    ):
+        cinematic_active = render_story_experience(
+            chapter_id=chapter[0],
+            theme=world[4],
+            story_text=chapter[4],
+            chapter_number=chapter[2],
+            chapter_title=format_inline_text(chapter[3]),
         )
 
-    paragraphs = (
-        _split_story_paragraphs(
-            chapter[4]
-        )
-    )
-
-    paragraphs_html = (
-        "".join(
-            (
-                '<p class="story-paragraph">'
-                f"{html.escape(item)}"
-                "</p>"
+        if cinematic_active:
+            queue_once(
+                key=f"story_open_{chapter[0]}",
+                event_type="story_open",
+                user_id=user["user_id"],
+                world_id=world[0],
+                story_arc_id=(arc["id"] if arc else None),
+                chapter_id=chapter[0],
+                metadata={
+                    "theme": world[4],
+                    "chapter_number": chapter[2],
+                    "story_phase": phase,
+                    "story_length": len(chapter[4] or ""),
+                },
+                flush=True,
             )
-            for item in paragraphs
-        )
-    )
+            return True
 
-    st.markdown(
-        (
-            '<article class="story-card">'
-            f'<span class="story-label">{html.escape(pack["story_label"])}</span>'
-            f"{paragraphs_html}"
-            "</article>"
+    # DAY5_COMPACT_LEARNING_UI_V1_CHAPTER
+    render_compact_chapter_header(
+        theme=world[4],
+        chapter_number=chapter[2],
+        block_number=block_number,
+        title=format_inline_text(chapter[3]),
+        meta=(
+            f"{phase_label} · {world[4]} · {world[1]}"
         ),
-        unsafe_allow_html=True,
+        progress_current=(chapter[2] if total else None),
+        progress_total=(total if total else None),
     )
 
     targets = (
@@ -464,36 +535,43 @@ def _render_chapter_story(
         else []
     )
 
-    with st.expander(
-        "🎯 이번 Chapter의 학습 목표",
-        expanded=False,
-    ):
-        if targets:
-            st.caption(
-                "핵심 Concept · "
-                + ", ".join(
-                    targets
-                )
-            )
+    # Story 다시보기와 학습 목표를 한 줄의 compact utility로 묶어
+    # Investigation이 viewport 상단에 더 빨리 도달하도록 한다.
+    tool_left, tool_right = st.columns(2, gap="small")
+    with tool_left:
+        st.markdown('<span class="compact-learning-tools-marker"></span>', unsafe_allow_html=True)
+        render_story_experience(
+            chapter_id=chapter[0],
+            theme=world[4],
+            story_text=chapter[4],
+            chapter_number=chapter[2],
+            chapter_title=format_inline_text(chapter[3]),
+        )
 
-        for objective in (
-            chapter[5]
-            or []
+    with tool_right:
+        with st.expander(
+            "🎯 이번 Chapter의 학습 목표",
+            expanded=False,
         ):
-            st.markdown(
-                f"- {format_inline_text(objective)}"
-            )
+            if targets:
+                st.caption(
+                    "핵심 Concept · "
+                    + ", ".join(
+                        targets
+                    )
+                )
 
-    st.markdown(
-        f"""
-        <div class="story-separator">✦ · ✦ · ✦</div>
-        <div class="quest-section-heading">
-            <div class="quest-kicker">{html.escape(pack["quest_label"])}</div>
-            <div class="quest-title">{html.escape(pack["quest_title"])}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            for objective in (
+                chapter[5]
+                or []
+            ):
+                st.markdown(
+                    f"- {format_inline_text(objective)}"
+                )
+
+    # DAY5_INVESTIGATION_HEADER_CLEANUP_V1
+    # Investigation Board가 문제 풀이 단계의 실제 heading 역할을 하므로,
+    # Story 뒤의 장식 separator + EVIDENCE CHECK/quest title 중복 heading은 렌더하지 않는다.
 
     queue_once(
         key=(
@@ -519,7 +597,10 @@ def _render_chapter_story(
                 or ""
             ),
         },
+        flush=True,
     )
+
+    return False
 
 
 def _initialize_quiz_progress_from_db(
@@ -662,7 +743,8 @@ def _render_story_choice(
         "### 이야기에서 무엇을 할까?"
     )
     st.caption(
-        "학습 성적과 관계없이 원하는 Story 방향을 선택할 수 있습니다."
+        "학습 성적과 관계없이 원하는 Story 방향을 선택할 수 있습니다. "
+        "선택한 방향은 다음 Story Block의 첫 장면에 직접 반영됩니다."
     )
 
     if selected:
@@ -972,6 +1054,12 @@ def render_chapter_complete(
                 reset_quiz_state()
                 st.rerun()
 
+            except AIQuotaExhausted:
+                st.error(
+                    "Gemini의 일일 무료 요청 할당량이 소진되었습니다. "
+                    "이 경우 자동 재시도하지 않습니다. 현재 진행 상태는 그대로 유지됩니다."
+                )
+
             except Exception:
                 st.error(
                     "다음 Chapter를 생성하는 중 문제가 발생했습니다. "
@@ -1080,19 +1168,76 @@ def render_quiz(
         or "나"
     )
 
-    st.caption(
-        f"동료 고양이 · {guide_name}와 함께 · "
-        f"문제 {index + 1} / {len(questions)}"
+    task_label = format_inline_text(
+        question.get("task_label")
+        or ""
     )
+    experience_profile = get_theme_experience_profile(world[4])
 
-    st.markdown(
-        f"### {format_inline_text(question['question'])}"
-    )
+    if task_label:
+        investigation_meta = (
+            f"{guide_name}와 함께 · "
+            f"{experience_profile['step_noun']} {index + 1} / {len(questions)} · "
+            f"{task_label}"
+        )
+    else:
+        investigation_meta = (
+            f"{guide_name}와 함께 · "
+            f"{experience_profile['step_noun']} {index + 1} / {len(questions)}"
+        )
 
-    if not st.session_state.get(
+    question_submitted = st.session_state.get(
         "question_submitted",
         False,
-    ):
+    )
+
+    # DAY5_INVESTIGATION_BOARD_V2_INTEGRATION
+    ui_mode = get_ui_support_mode(world[3])
+    default_action = (
+        ACTION_COMPANION
+        if ui_mode in {"guided", "supported"}
+        else ACTION_CLUE
+    )
+    active_action = render_investigation_board(
+        theme=world[4],
+        guide_name=guide_name,
+        chapter_id=chapter[0],
+        question_index=index,
+        default_action=default_action,
+        require_companion_before_deduce=(
+            ui_mode in {"guided", "supported"}
+        ),
+        context_meta=investigation_meta,
+    )
+
+    if active_action is None:
+        return
+
+    if active_action == ACTION_CLUE:
+        _render_learning_materials(
+            theme=world[4],
+            learner_level=world[3],
+            difficulty=(question.get("difficulty") or "basic"),
+            question=question,
+            section=ACTION_CLUE,
+        )
+    elif active_action == ACTION_COMPANION:
+        _render_learning_materials(
+            theme=world[4],
+            learner_level=world[3],
+            difficulty=(question.get("difficulty") or "basic"),
+            question=question,
+            section=ACTION_COMPANION,
+        )
+    else:
+        st.markdown(
+            f"### {format_inline_text(question['question'])}"
+        )
+
+    if not question_submitted:
+        if active_action != ACTION_DEDUCE:
+            return
+
         selected = st.radio(
             "답을 선택하세요.",
             options=range(
@@ -1164,8 +1309,10 @@ def render_quiz(
                 ),
             )
 
+            mastery_update_ok = False
+            mastery_score_after = None
             try:
-                update_mastery_from_attempt(
+                mastery_score_after = update_mastery_from_attempt(
                     user_id=user[
                         "user_id"
                     ],
@@ -1180,9 +1327,16 @@ def render_quiz(
                         difficulty
                     ),
                 )
+                mastery_update_ok = True
             except Exception:
-                # Mastery 파생 저장 실패가 Critical attempt를 막지 않는다.
-                pass
+                # Attempt는 유지하되 파생 Mastery 실패는 반드시 로그로 남긴다.
+                LOGGER.exception(
+                    "Mastery update failed user_id=%s world_id=%s chapter_id=%s concept=%r",
+                    user["user_id"],
+                    world[0],
+                    chapter[0],
+                    question["concept"],
+                )
 
             queue_event(
                 "question_answered",
@@ -1204,6 +1358,8 @@ def render_quiz(
                     "response_time_ms": (
                         response_time_ms
                     ),
+                    "mastery_update_ok": mastery_update_ok,
+                    "mastery_score_after": mastery_score_after,
                 },
             )
 
@@ -1213,6 +1369,11 @@ def render_quiz(
             st.session_state[
                 "question_submitted"
             ] = True
+            set_investigation_action(
+                chapter_id=chapter[0],
+                question_index=index,
+                action=ACTION_DEDUCE,
+            )
             st.session_state[
                 "show_npc_reply"
             ] = False
@@ -1236,16 +1397,8 @@ def render_quiz(
 
     user_answer_text = (
         _format_choice_reply(
-            theme=world[4],
-            choice_number=(
-                selected_answer + 1
-            ),
-            variation_key=(
-                f"{world[0]}:"
-                f"{chapter[0]}:"
-                f"{index}:"
-                f"{selected_answer}"
-            ),
+            choice_number=(selected_answer + 1),
+            choice_text=question["choices"][selected_answer],
         )
     )
 
@@ -1300,6 +1453,35 @@ def render_quiz(
         align="npc",
     )
 
+    story_progress = _sanitize_learning_text(
+        question.get("story_progress")
+    )
+
+    if story_progress:
+        experience_profile = get_theme_experience_profile(world[4])
+        is_conclusion_step = index == len(questions) - 1
+
+        if is_conclusion_step:
+            label = (
+                experience_profile["conclusion_label"]
+                if is_correct
+                else experience_profile["review_conclusion_label"]
+            )
+            if is_correct:
+                st.success(f"✨ {label} · {story_progress}")
+            else:
+                st.info(f"✨ {label} · {story_progress}")
+        else:
+            label = (
+                experience_profile["progress_label"]
+                if is_correct
+                else experience_profile["review_progress_label"]
+            )
+            if is_correct:
+                st.success(f"✨ {label} · {story_progress}")
+            else:
+                st.info(f"✨ {label} · {story_progress}")
+
     pack = get_theme_pack(
         world[4]
     )
@@ -1330,8 +1512,10 @@ def render_quiz(
         ),
     )
 
+    next_label = get_theme_experience_profile(world[4])["next_label"]
+
     if st.button(
-        "다음 문제",
+        next_label,
         key=(
             f"next_"
             f"{chapter[0]}_{index}"
@@ -1344,6 +1528,11 @@ def render_quiz(
         st.session_state[
             "question_submitted"
         ] = False
+
+        clear_investigation_question_state(
+            chapter_id=chapter[0],
+            question_index=index,
+        )
 
         for key in (
             "selected_answer",
@@ -1365,15 +1554,14 @@ def render_learning_tab(
     user,
     world,
 ):
-    if is_ai_mock_enabled():
-        st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
-
     chapter = get_chapter(
         world_id=world[0],
         chapter_number=world[7],
     )
 
     if chapter is None:
+        if is_ai_mock_enabled():
+            st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
         st.warning(
             "현재 Chapter가 아직 준비되지 않았습니다."
         )
@@ -1409,6 +1597,12 @@ def render_learning_tab(
                     reset_quiz_state()
                     st.rerun()
 
+                except AIQuotaExhausted:
+                    st.error(
+                        "Gemini의 일일 무료 요청 할당량이 소진되었습니다. "
+                        "자동 재시도는 중단했습니다. 할당량이 갱신된 뒤 다시 시도해주세요."
+                    )
+
                 except Exception as exc:
                     traceback.print_exc()
                     st.error(
@@ -1423,11 +1617,29 @@ def render_learning_tab(
 
         return
 
-    _render_chapter_story(
+    # Dedicated Cinematic 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
+    if should_render_story_cinematic(
+        chapter_id=chapter[0],
+        story_text=chapter[4],
+    ):
+        _render_chapter_story(
+            user=user,
+            world=world,
+            chapter=chapter,
+        )
+        return
+
+    if is_ai_mock_enabled():
+        st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
+
+    cinematic_active = _render_chapter_story(
         user=user,
         world=world,
         chapter=chapter,
     )
+
+    if cinematic_active:
+        return
 
     questions = (
         chapter[6]
@@ -1479,12 +1691,39 @@ def render_learning_tab(
                 )
             )
 
+            support_profile = get_learner_level_profile(world[3])
+            reasoning_profile = get_reasoning_profile(requested_difficulty)
+            adaptive_support = get_adaptive_support_profile(
+                user_id=user["user_id"],
+                world_id=world[0],
+                target_concepts=targets,
+            )
             st.caption(
-                f"현재 요청 난이도 · {requested_difficulty}"
+                f"학습 지원 · {support_profile['display_name']} · "
+                f"현재 사고 난이도 · {reasoning_profile['label']}"
+            )
+            st.caption(
+                f"개인화 · {adaptive_support['label']}"
+            )
+
+            interaction_context = get_chapter_interaction_context(
+                world_id=world[0],
+                chapter_number=chapter[2],
+                theme=world[4],
+            )
+
+            experience_profile = get_theme_experience_profile(world[4])
+            st.caption(
+                f"이번 {experience_profile['interaction_noun']} · "
+                f"{interaction_context.get('label') or '상황 적용'}"
+            )
+
+            prepare_label = experience_profile["prepare_label"].format(
+                count=QUESTION_COUNT
             )
 
             if st.button(
-                f"문제 {QUESTION_COUNT}개 준비",
+                prepare_label,
                 type="primary",
                 key=(
                     f"generate_questions_"
@@ -1498,8 +1737,12 @@ def render_learning_tab(
                     )
                 )
 
+                spinner_text = experience_profile["spinner_label"].format(
+                    count=QUESTION_COUNT
+                )
+
                 with st.spinner(
-                    f"Story와 Curriculum을 연결해 문제 {QUESTION_COUNT}개를 만들고 있습니다..."
+                    spinner_text
                 ):
                     try:
                         generated_questions = (
@@ -1524,10 +1767,34 @@ def render_learning_tab(
                                 requested_difficulty=(
                                     requested_difficulty
                                 ),
+                                adaptive_support=(
+                                    adaptive_support
+                                ),
                                 guide_name=(
                                     world[9]
                                     if len(world) > 9
                                     else None
+                                ),
+                                interaction_mode=(
+                                    interaction_context.get(
+                                        "mode"
+                                    )
+                                ),
+                                interaction_goal=(
+                                    interaction_context.get(
+                                        "goal"
+                                    )
+                                ),
+                                chapter_number=chapter[2],
+                                target_chapter_count=(
+                                    context["arc"].get("target_chapter_count")
+                                    if context
+                                    else None
+                                ),
+                                current_open_threads=(
+                                    (context.get("state") or {}).get("open_threads", [])
+                                    if context
+                                    else []
                                 ),
                                 user_id=user[
                                     "user_id"

@@ -2,98 +2,89 @@ from repositories.attempt_repository import (
     get_concept_stats,
     get_concept_stats_for_chapter,
 )
+from repositories.mastery_repository import get_mastery_profile
+from services.mastery_service import classify_mastery_item
+
+
+def _accuracy_from_mastery(item: dict) -> float:
+    attempts = int(item.get("attempts") or 0)
+    correct = int(item.get("correct_count") or 0)
+    return (correct / attempts) if attempts else 0.0
 
 
 def classify_recent_stats(
     stats: list[dict],
+    mastery_by_concept: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """
-    방금 끝낸 Chapter 결과를 판정한다.
-
-    최근 결과는 즉시 다음 Chapter에 반영되어야 하므로
-    누적 프로필보다 민감하게 판정한다.
-
-    - 정답률 0%      -> weak
-    - 0% 초과 100% 미만 -> review
-    - 정답률 100%    -> strong
-    """
+    """최근 Chapter 결과와 장기 Mastery를 함께 사용한다."""
+    mastery_by_concept = mastery_by_concept or {}
     result = []
-
     for stat in stats:
-        accuracy = stat["accuracy"]
-
-        if accuracy == 0:
-            status = "weak"
-        elif accuracy < 1.0:
-            status = "review"
-        else:
-            status = "strong"
-
-        result.append(
-            {
-                **stat,
-                "status": status,
-            }
+        concept = stat["concept"]
+        accuracy = float(stat["accuracy"])
+        mastery_item = mastery_by_concept.get(concept)
+        mastery_status = (
+            classify_mastery_item(mastery_item)
+            if mastery_item is not None else None
         )
 
+        if accuracy == 0 or mastery_status == "weak":
+            status = "weak"
+        elif mastery_status == "review" or accuracy < 1.0:
+            status = "review"
+        elif mastery_status == "strong":
+            status = "strong"
+        else:
+            status = "strong" if accuracy == 1.0 else "review"
+
+        result.append({
+            **stat,
+            "mastery_score": (
+                float(mastery_item["mastery_score"])
+                if mastery_item is not None else None
+            ),
+            "status": status,
+        })
     return result
 
 
-def classify_global_stats(
-    stats: list[dict],
-) -> list[dict]:
-    """
-    월드 전체 누적 결과를 판정한다.
-
-    누적 프로필은 한 번의 실수에 지나치게 흔들리지 않도록
-    기존 MVP 기준을 유지한다.
-
-    - 2회 이상 + 정답률 50% 이하 -> weak
-    - 정답률 100% 미만          -> review
-    - 정답률 100%               -> strong
-    """
+def classify_global_stats(stats: list[dict]) -> list[dict]:
+    """Mastery row가 없는 legacy 상황을 위한 accuracy fallback."""
     result = []
-
     for stat in stats:
         attempts = stat["attempts"]
         accuracy = stat["accuracy"]
-
         if attempts >= 2 and accuracy <= 0.5:
             status = "weak"
         elif accuracy < 1.0:
             status = "review"
         else:
             status = "strong"
-
-        result.append(
-            {
-                **stat,
-                "status": status,
-            }
-        )
-
+        result.append({**stat, "status": status})
     return result
 
 
-def classify_stats(
-    stats: list[dict],
-) -> list[dict]:
-    """
-    기존 코드 호환용.
-    별도 구분이 없는 경우에는 누적 프로필 판정 규칙을 사용한다.
-    """
+def classify_stats(stats: list[dict]) -> list[dict]:
     return classify_global_stats(stats)
 
 
-def _names_by_status(
-    classified: list[dict],
-    status: str,
-) -> list[str]:
+def _global_from_mastery(rows: list[dict]) -> list[dict]:
     return [
-        item["concept"]
-        for item in classified
-        if item["status"] == status
+        {
+            "concept": item["concept"],
+            "attempts": item["attempts"],
+            "correct_count": item["correct_count"],
+            "accuracy": _accuracy_from_mastery(item),
+            "mastery_score": item["mastery_score"],
+            "review_needed": item["review_needed"],
+            "status": classify_mastery_item(item),
+        }
+        for item in rows
     ]
+
+
+def _names_by_status(classified: list[dict], status: str) -> list[str]:
+    return [item["concept"] for item in classified if item["status"] == status]
 
 
 def build_personalization_profile(
@@ -101,68 +92,39 @@ def build_personalization_profile(
     world_id: int,
     chapter_id: int,
 ) -> dict:
-    """
-    다음 Chapter 생성용 개인화 프로필.
-
-    recent:
-        방금 끝낸 Chapter 결과.
-        최근 오답을 빠르게 반영하기 위해 민감한 기준을 사용한다.
-
-    global:
-        현재 월드 전체 누적 결과.
-        장기적인 강점/약점을 보기 위해 보수적인 기준을 사용한다.
-    """
+    """Mastery를 장기 개인화의 Single Source of Truth로 사용한다."""
     recent_stats = get_concept_stats_for_chapter(
-        user_id=user_id,
-        world_id=world_id,
-        chapter_id=chapter_id,
+        user_id=user_id, world_id=world_id, chapter_id=chapter_id
     )
-
-    global_stats = get_concept_stats(
-        user_id=user_id,
-        world_id=world_id,
-    )
+    mastery_rows = get_mastery_profile(user_id=user_id, world_id=world_id)
+    mastery_by_concept = {item["concept"]: item for item in mastery_rows}
 
     recent = classify_recent_stats(
-        recent_stats
+        recent_stats,
+        mastery_by_concept=mastery_by_concept,
     )
+    global_ = _global_from_mastery(mastery_rows)
 
-    global_ = classify_global_stats(
-        global_stats
-    )
+    if not global_:
+        global_ = classify_global_stats(
+            get_concept_stats(user_id=user_id, world_id=world_id)
+        )
 
     return {
         "recent": {
-            "weak": _names_by_status(
-                recent,
-                "weak",
-            ),
-            "review": _names_by_status(
-                recent,
-                "review",
-            ),
-            "strong": _names_by_status(
-                recent,
-                "strong",
-            ),
+            "weak": _names_by_status(recent, "weak"),
+            "review": _names_by_status(recent, "review"),
+            "strong": _names_by_status(recent, "strong"),
         },
         "global": {
-            "weak": _names_by_status(
-                global_,
-                "weak",
-            ),
-            "review": _names_by_status(
-                global_,
-                "review",
-            ),
-            "strong": _names_by_status(
-                global_,
-                "strong",
-            ),
+            "weak": _names_by_status(global_, "weak"),
+            "review": _names_by_status(global_, "review"),
+            "strong": _names_by_status(global_, "strong"),
         },
         "recent_details": recent,
         "global_details": global_,
     }
+
 
 def get_latest_chapter_personalization_profile(
     user_id: int,

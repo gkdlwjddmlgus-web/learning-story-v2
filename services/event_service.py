@@ -53,8 +53,10 @@ def queue_event(
         }
     )
 
+
     if flush or len(buffer) >= 6:
         flush_events()
+
 
 
 def flush_events() -> None:
@@ -68,17 +70,20 @@ def flush_events() -> None:
 
     pending = list(buffer)
 
+
     try:
         insert_events(
             pending
         )
-    except Exception:
+    except Exception as exc:
         # Analytics 저장 실패 때문에 Story/학습이 멈추면 안 된다.
         return
+
 
     st.session_state[
         BUFFER_KEY
     ] = []
+
 
 
 def queue_once(

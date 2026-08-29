@@ -5,6 +5,7 @@ from components.theme_system import (
 )
 from repositories.attempt_repository import (
     get_concept_stats,
+    get_latest_attempted_chapter_number,
 )
 from repositories.chapter_repository import (
     get_chapter,
@@ -101,19 +102,22 @@ def render_record_tab(
                     )
                 )
 
-    current_chapter_number = (
-        world[7]
+    latest_attempted_chapter_number = get_latest_attempted_chapter_number(
+        user_id=user["user_id"],
+        world_id=world[0],
     )
 
-    chapter = get_chapter(
-        world_id=world[0],
-        chapter_number=(
-            current_chapter_number
-        ),
+    chapter = (
+        get_chapter(
+            world_id=world[0],
+            chapter_number=latest_attempted_chapter_number,
+        )
+        if latest_attempted_chapter_number is not None
+        else None
     )
 
     with st.expander(
-        "최근 Chapter 분석",
+        "최근 풀이 Chapter 분석",
         expanded=False,
     ):
         if chapter:
@@ -157,12 +161,12 @@ def render_record_tab(
                 )
 
             st.caption(
-                "최근 결과는 다음 Story Block의 학습 난이도와 "
-                "취약 Concept 재노출에 우선 반영됩니다."
+                "최근 풀이 결과와 누적 Mastery는 다음 Story Block의 "
+                "개인화와 취약 Concept 재노출에 함께 반영됩니다."
             )
         else:
             st.info(
-                "현재 Chapter 정보를 찾을 수 없습니다."
+                "아직 풀이가 완료된 Chapter 기록이 없습니다."
             )
 
     with st.expander(

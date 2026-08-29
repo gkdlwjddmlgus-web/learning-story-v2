@@ -346,7 +346,8 @@ def _css_for_theme(
         .stButton > button[kind="primary"],
         .stButton > button[data-testid="stBaseButton-primary"] {
             background:linear-gradient(135deg,#f29ab0,#f6ad99) !important;
-            color:white !important; border:none !important;
+            /* DAY5_THEME_UX_V1: 밝은 pastel CTA 위 텍스트 대비 보강 */
+            color:#4d2834 !important; border:none !important;
         }
         .learning-note { background:#eef5ff; border-color:#d7e5f5; color:#4e6889; }
         </style>
@@ -393,7 +394,8 @@ def _css_for_theme(
         }
         .stButton > button[kind="primary"],
         .stButton > button[data-testid="stBaseButton-primary"] {
-            background:linear-gradient(135deg,#7b5c28,#b28a45) !important;
+            /* DAY5_THEME_UX_V1: 밝은 gold 끝점을 낮춰 CTA 텍스트 대비 확보 */
+            background:linear-gradient(135deg,#7b5c28,#88652e) !important;
             color:#fff3d4 !important; border:none !important;
         }
         .learning-note { background:rgba(58,50,37,.82); border-color:rgba(202,165,93,.30); color:#e6d8b7; }
@@ -444,7 +446,8 @@ def _css_for_theme(
         }
         .stButton > button[kind="primary"],
         .stButton > button[data-testid="stBaseButton-primary"] {
-            background:linear-gradient(135deg,#0d6f8a,#13b5c8) !important;
+            /* DAY5_THEME_UX_V1: 밝은 cyan 끝점을 낮춰 CTA 텍스트 대비 확보 */
+            background:linear-gradient(135deg,#0d6f8a,#0d7c8f) !important;
             color:#eaffff !important; border:none !important;
         }
         .learning-note { background:rgba(7,35,58,.92); border-color:rgba(73,184,255,.30); color:#a9ddff; }
@@ -596,7 +599,7 @@ button[data-baseweb="tab"] {
 
 .chapter-heading {
     max-width:900px;
-    margin:2.4rem auto 1.2rem;
+    margin:1.55rem auto .8rem;
     text-align:center;
 }
 
@@ -604,31 +607,31 @@ button[data-baseweb="tab"] {
     font-size:.77rem;
     font-weight:900;
     letter-spacing:.15em;
-    margin-bottom:.5rem;
+    margin-bottom:.35rem;
 }
 
 .chapter-title {
-    font-size:clamp(1.85rem,3vw,2.65rem);
+    font-size:clamp(1.7rem,2.65vw,2.35rem);
     font-weight:900;
     line-height:1.23;
     word-break:keep-all;
 }
 
 .chapter-meta {
-    margin-top:.65rem;
+    margin-top:.45rem;
     font-size:.91rem;
     opacity:.78;
 }
 
 .story-progress-shell {
     max-width:900px;
-    margin:.4rem auto 1.2rem;
+    margin:.25rem auto .75rem;
 }
 
 .story-card {
     max-width:900px;
-    margin:0 auto 1.55rem;
-    padding:2.25rem 2.6rem 2.55rem;
+    margin:0 auto .95rem;
+    padding:1.7rem 2.15rem 1.9rem;
 }
 
 .story-label {
@@ -636,14 +639,14 @@ button[data-baseweb="tab"] {
     font-size:.76rem;
     font-weight:900;
     letter-spacing:.13em;
-    margin-bottom:1.45rem;
+    margin-bottom:1rem;
 }
 
 .story-paragraph {
     max-width:760px;
-    margin:0 auto 1.35rem;
+    margin:0 auto .9rem;
     font-size:1.07rem;
-    line-height:1.92;
+    line-height:1.76;
     letter-spacing:-.01em;
     word-break:keep-all;
     overflow-wrap:break-word;
@@ -655,7 +658,7 @@ button[data-baseweb="tab"] {
 
 .story-separator {
     max-width:900px;
-    margin:1.5rem auto 1.05rem;
+    margin:.9rem auto .7rem;
     text-align:center;
     opacity:.5;
     letter-spacing:.42rem;
@@ -833,8 +836,7 @@ def _theme_enhancement_css(
         }
 
         .stApp .stTextInput input,
-        .stApp .stTextArea textarea,
-        .stApp div[data-baseweb="select"] > div {
+        .stApp .stTextArea textarea {
             background:#24211e !important;
             color:#f4ead5 !important;
             -webkit-text-fill-color:#f4ead5 !important;
@@ -847,19 +849,73 @@ def _theme_enhancement_css(
             opacity:1 !important;
         }
 
-        .stApp div[data-baseweb="select"] span,
-        .stApp div[data-baseweb="select"] svg {
+        /* DAY5_THEME_UX_V2:
+           V1에서 본체 대부분은 어두워졌지만 clear/arrow segment와 portal dropdown이
+           Streamlit 기본 Light surface로 남았다. select 내부 child layer와 body portal을
+           함께 덮고 focus red ring도 Fantasy accent로 통일한다. */
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"],
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+        .stApp [data-testid="stSelectbox"] [role="combobox"],
+        .stApp [data-testid="stSelectbox"] [role="combobox"] > div,
+        .stApp [data-testid="stSelectbox"] button {
+            color-scheme:dark !important;
+            background:#24211e !important;
+            background-color:#24211e !important;
+            color:#f4ead5 !important;
+            -webkit-text-fill-color:#f4ead5 !important;
+            border-color:rgba(202,165,93,.58) !important;
+        }
+
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within,
+        .stApp [data-testid="stSelectbox"] [role="combobox"]:focus,
+        .stApp [data-testid="stSelectbox"] [role="combobox"]:focus-within {
+            outline:none !important;
+            border-color:rgba(202,165,93,.78) !important;
+            box-shadow:0 0 0 1px rgba(202,165,93,.78) !important;
+        }
+
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] span,
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] svg,
+        .stApp [data-testid="stSelectbox"] [role="combobox"] span,
+        .stApp [data-testid="stSelectbox"] [role="combobox"] svg,
+        .stApp [data-testid="stSelectbox"] button svg {
             color:#f4ead5 !important;
             fill:#f4ead5 !important;
         }
 
-        div[data-baseweb="popover"] ul[role="listbox"] {
+        body div[data-baseweb="popover"],
+        body div[data-baseweb="popover"] > div,
+        body div[data-baseweb="popover"] div[data-baseweb="menu"],
+        body div[data-baseweb="popover"] div[data-baseweb="menu"] > div,
+        body div[data-baseweb="popover"] [role="listbox"],
+        body div[data-baseweb="popover"] [role="listbox"] > div,
+        body div[data-baseweb="popover"] ul,
+        body [role="listbox"] {
             background:#24211e !important;
+            background-color:#24211e !important;
             color:#f4ead5 !important;
         }
 
-        div[data-baseweb="popover"] li[role="option"] {
+        body div[data-baseweb="popover"] [role="option"],
+        body [role="listbox"] [role="option"],
+        body [role="listbox"] li {
+            background:#24211e !important;
+            background-color:#24211e !important;
             color:#f4ead5 !important;
+            -webkit-text-fill-color:#f4ead5 !important;
+        }
+
+        body div[data-baseweb="popover"] [role="option"]:hover,
+        body div[data-baseweb="popover"] [role="option"][aria-selected="true"],
+        body div[data-baseweb="popover"] [role="option"][data-highlighted="true"],
+        body [role="listbox"] [role="option"]:hover,
+        body [role="listbox"] [role="option"][aria-selected="true"],
+        body [role="listbox"] [role="option"][data-highlighted="true"] {
+            background:#3a3126 !important;
+            background-color:#3a3126 !important;
+            color:#fff1cf !important;
+            -webkit-text-fill-color:#fff1cf !important;
         }
         </style>
         """
@@ -916,8 +972,7 @@ def _theme_enhancement_css(
         }
 
         .stApp .stTextInput input,
-        .stApp .stTextArea textarea,
-        .stApp div[data-baseweb="select"] > div {
+        .stApp .stTextArea textarea {
             background:#0b2435 !important;
             color:#e9faff !important;
             -webkit-text-fill-color:#e9faff !important;
@@ -930,19 +985,73 @@ def _theme_enhancement_css(
             opacity:1 !important;
         }
 
-        .stApp div[data-baseweb="select"] span,
-        .stApp div[data-baseweb="select"] svg {
+        /* DAY5_THEME_UX_V2:
+           V1에서 본체 대부분은 어두워졌지만 clear/arrow segment와 portal dropdown이
+           Streamlit 기본 Light surface로 남았다. select 내부 child layer와 body portal을
+           함께 덮고 focus red ring도 SF cyan accent로 통일한다. */
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"],
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+        .stApp [data-testid="stSelectbox"] [role="combobox"],
+        .stApp [data-testid="stSelectbox"] [role="combobox"] > div,
+        .stApp [data-testid="stSelectbox"] button {
+            color-scheme:dark !important;
+            background:#0b2435 !important;
+            background-color:#0b2435 !important;
+            color:#e9faff !important;
+            -webkit-text-fill-color:#e9faff !important;
+            border-color:rgba(62,214,244,.58) !important;
+        }
+
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within,
+        .stApp [data-testid="stSelectbox"] [role="combobox"]:focus,
+        .stApp [data-testid="stSelectbox"] [role="combobox"]:focus-within {
+            outline:none !important;
+            border-color:rgba(62,214,244,.82) !important;
+            box-shadow:0 0 0 1px rgba(62,214,244,.82) !important;
+        }
+
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] span,
+        .stApp [data-testid="stSelectbox"] div[data-baseweb="select"] svg,
+        .stApp [data-testid="stSelectbox"] [role="combobox"] span,
+        .stApp [data-testid="stSelectbox"] [role="combobox"] svg,
+        .stApp [data-testid="stSelectbox"] button svg {
             color:#e9faff !important;
             fill:#e9faff !important;
         }
 
-        div[data-baseweb="popover"] ul[role="listbox"] {
+        body div[data-baseweb="popover"],
+        body div[data-baseweb="popover"] > div,
+        body div[data-baseweb="popover"] div[data-baseweb="menu"],
+        body div[data-baseweb="popover"] div[data-baseweb="menu"] > div,
+        body div[data-baseweb="popover"] [role="listbox"],
+        body div[data-baseweb="popover"] [role="listbox"] > div,
+        body div[data-baseweb="popover"] ul,
+        body [role="listbox"] {
             background:#0b2435 !important;
+            background-color:#0b2435 !important;
             color:#e9faff !important;
         }
 
-        div[data-baseweb="popover"] li[role="option"] {
+        body div[data-baseweb="popover"] [role="option"],
+        body [role="listbox"] [role="option"],
+        body [role="listbox"] li {
+            background:#0b2435 !important;
+            background-color:#0b2435 !important;
             color:#e9faff !important;
+            -webkit-text-fill-color:#e9faff !important;
+        }
+
+        body div[data-baseweb="popover"] [role="option"]:hover,
+        body div[data-baseweb="popover"] [role="option"][aria-selected="true"],
+        body div[data-baseweb="popover"] [role="option"][data-highlighted="true"],
+        body [role="listbox"] [role="option"]:hover,
+        body [role="listbox"] [role="option"][aria-selected="true"],
+        body [role="listbox"] [role="option"][data-highlighted="true"] {
+            background:#12394e !important;
+            background-color:#12394e !important;
+            color:#f4fdff !important;
+            -webkit-text-fill-color:#f4fdff !important;
         }
         </style>
         """

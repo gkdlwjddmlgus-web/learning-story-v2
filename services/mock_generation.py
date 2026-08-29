@@ -3,6 +3,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from services.experience_profile_service import (
+    get_action_plan,
+    get_interaction_info,
+    pick_interaction_mode,
+)
+
 
 def _seed(*parts: object) -> int:
     text = "|".join(str(part) for part in parts)
@@ -102,25 +108,41 @@ def mock_block_outline(context: dict[str, Any]) -> dict:
     theme=context.get("theme","동화"); guide=context.get("guide_name") or "고양이"
     concept_plan=context.get("chapter_concept_plan") or {}
     block_no=((start-1)//3)+1
+    target_count=int(context.get("target_chapter_count", max(end, 9)))
+    recent=set(context.get("recent_interaction_modes") or [])
     chapters=[]
+
     for n in range(start,end+1):
         concepts=concept_plan.get(n) or concept_plan.get(str(n)) or [f"학습 개념 {n}"]
         phase=context.get("phase_map",{}).get(n) or context.get("phase_map",{}).get(str(n)) or "setup"
+        mode=pick_interaction_mode(
+            theme=theme,
+            chapter_number=n,
+            target_chapter_count=target_count,
+            phase=phase,
+            avoid=recent,
+        )
+        info=get_interaction_info(theme, mode)
+        recent.add(mode)
+
         chapters.append({
             "chapter_number": n,
             "phase": phase,
-            "title_seed": f"{guide}와 발견한 {block_no}번째 단서 {n}",
-            "narrative_goal": f"{concepts[0]}을 알아야 다음 단서를 이해할 수 있는 상황을 만든다.",
-            "learning_bridge": f"이야기 속 문제를 해결하기 위해 {', '.join(concepts[:2])}을 확인한다.",
-            "ending_hook": "다음 행동으로 이어지는 작은 의문을 남긴다." if n<end else "이번 이야기 묶음의 사건을 한 단계 정리한다.",
+            "title_seed": f"{guide}와 함께하는 {info['label']} {n}",
+            "narrative_goal": f"{info['label']} 행동을 통해 {concepts[0]}과 연결된 다음 상황을 연다.",
+            "learning_bridge": f"Story 행동 속에서 {', '.join(concepts[:2])}을 이해하고 적용한다.",
+            "ending_hook": "다음 행동으로 이어지는 작은 변화를 남긴다." if n<end else "이번 이야기 묶음의 진행을 한 단계 정리한다.",
             "target_concepts": list(concepts[:2]),
+            "interaction_mode": mode,
+            "interaction_goal": info["goal"],
         })
+
     return {
         "block_number": block_no,
         "block_title": f"{theme} 이야기 묶음 {block_no}",
-        "block_goal": f"{guide}와 함께 하나의 사건을 따라가며 학습 개념을 적용한다.",
+        "block_goal": f"{guide}와 함께 Theme에 맞는 서로 다른 행동으로 학습 개념을 사용한다.",
         "chapters": chapters,
-        "block_resolution": "마지막 Chapter에서 이번 Block의 직접적인 의문을 정리하되 전체 Story Arc의 핵심 갈등은 남긴다.",
+        "block_resolution": "마지막 Chapter에서 이번 Block의 직접적인 문제를 정리하되 전체 Story Arc의 핵심 갈등은 남긴다.",
     }
 
 
@@ -167,28 +189,50 @@ def mock_questions(context: dict[str, Any]) -> list[dict]:
     concepts=context.get("target_concepts") or ["핵심 개념"]
     difficulty=context.get("requested_difficulty","basic")
     seed=_seed(context.get("world_id"),context.get("chapter_title"),','.join(concepts))
+    theme=context.get("theme") or "동화"
+    mode=context.get("interaction_mode")
+    plan=get_action_plan(theme=theme, interaction_mode=mode)
     out=[]
+
     for i in range(5):
         concept=concepts[i%len(concepts)]
         correct=(seed+i)%4
         choices=[
-            f"{concept}의 핵심 조건을 먼저 확인한다.",
-            f"{concept}과 관계없는 값을 임의로 바꾼다.",
-            f"문제의 조건을 무시하고 결과만 외운다.",
-            f"근거 없이 가장 복잡한 방법부터 적용한다.",
+            f"{concept}의 핵심 조건을 확인한 뒤 상황에 적용한다.",
+            f"{concept}과 비슷하지만 현재 조건에는 맞지 않는 방법을 적용한다.",
+            f"현재 자료와 맞지 않는 다른 조건을 전제로 판단한다.",
+            f"핵심 조건 하나를 놓친 채 일부 결과만 보고 결정한다.",
         ]
-        # correct_index가 가리키는 항목을 정답 문장으로 이동
         answer=choices[0]
         choices[0],choices[correct]=choices[correct],answer
+
+        role,label,instruction=plan[i] if i < len(plan) else (f"step_{i+1}", f"Mock 단계 {i+1}", "상황을 판단한다.")
+
         out.append({
             "concept": concept,
             "difficulty": difficulty,
-            "question": f"개발용 Mock 문제 {i+1}. 다음 중 '{concept}'을 적용할 때 가장 적절한 접근은 무엇인가요?",
+            "task_role": role,
+            "task_label": label,
+            "concept_brief": f"{concept}은(는) 이번 테스트에서 상황을 판단하기 위한 핵심 개념이다. 먼저 기본 역할을 확인한다.",
+            "evidence_summary": f"Mock 요약 {i+1}: {concept}을 적용해야 다음 상황을 이해할 수 있다.",
+            "evidence_context": f"Mock 상세 자료 {i+1}: {instruction}",
+            "evidence_help": "Mock: 실제 AI 대신 기능 흐름을 확인하기 위한 개발용 자료.",
+            "question": f"개발용 Mock 문제 {i+1}. 방금 확인한 '{concept}'을 현재 상황에 적용할 때 가장 적절한 접근은 무엇인가요?",
             "choices": choices,
             "correct_index": correct,
-            "correct_feedback": "좋아, 핵심을 잘 짚었어!",
-            "wrong_feedback": "조금 헷갈렸던 것 같아. 근거를 다시 같이 보자.",
-            "explanation": f"{concept}을 적용할 때는 먼저 문제의 조건과 개념의 핵심 역할을 확인해야 한다. 이 문제는 기능 흐름 테스트를 위한 Mock 데이터다.",
+            "story_progress": (
+                f"{mode or 'story'} 흐름의 Mock Chapter 결과로 {concept} 관련 핵심 방향을 정리했다."
+                if i == 4
+                else f"{mode or 'story'} 흐름에서 {concept}과 연결된 Mock 진행을 확인했다."
+            ),
+            "resolved_threads": (
+                list(context.get("current_open_threads") or [])[:1]
+                if i == 4
+                else []
+            ),
+            "correct_feedback": "좋아, 배운 기준을 잘 적용했어!",
+            "wrong_feedback": "조금 헷갈렸던 것 같아. 방금 배운 기준을 다시 같이 보자.",
+            "explanation": f"{concept}을 적용할 때는 문제의 조건과 개념의 핵심 역할을 연결해야 한다. 이 문제는 기능 흐름 테스트를 위한 Mock 데이터다.",
         })
     return out
 

@@ -178,3 +178,37 @@ def update_current_chapter(
             )
 
         conn.commit()
+
+# DAY5_WORLD_INTRO_CINEMATIC_V1_REPOSITORY
+def update_guide_name_for_world_intro(
+    *,
+    world_id: int,
+    user_id: int,
+    guide_name: str,
+) -> None:
+    """World Intro naming interaction에서 guide_name을 사용자 소유 월드에 저장한다."""
+    clean_name = str(guide_name or "").strip()
+    if not clean_name:
+        raise ValueError("guide_name must not be empty")
+
+    pool = get_pool()
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update public.v2_learning_worlds
+                set guide_name = %s
+                where id = %s
+                  and user_id = %s
+                """,
+                (
+                    clean_name,
+                    int(world_id),
+                    int(user_id),
+                ),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError(
+                    "동료 고양이 이름을 저장할 월드를 찾지 못했습니다."
+                )
+        conn.commit()
