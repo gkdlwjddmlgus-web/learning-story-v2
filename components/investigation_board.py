@@ -7,13 +7,13 @@ import streamlit as st
 
 # DAY5_INVESTIGATION_BOARD_V5_MOBILE_ACTION_ROW
 # DAY5_INVESTIGATION_BOARD_V4_MOBILE_RESPONSIVE
+# DAY6_INVESTIGATION_FLOW_UX_V3
 # DAY5_INVESTIGATION_BOARD_V3_COMPACT_NAV
 ACTION_CLUE = "clue"
 ACTION_COMPANION = "companion"
 ACTION_DEDUCE = "deduce"
 
 _ACTION_ORDER = (
-    ACTION_CLUE,
     ACTION_COMPANION,
     ACTION_DEDUCE,
 )
@@ -564,122 +564,143 @@ def render_investigation_board(
     guide_name: str,
     chapter_id: int,
     question_index: int,
-    default_action: str = ACTION_CLUE,
+    default_action: str = ACTION_DEDUCE,
     require_companion_before_deduce: bool = False,
     context_meta: str | None = None,
 ) -> str | None:
-    """첫 행동 전에는 4:3 carousel, 실행 후에는 compact action navigation을 렌더한다."""
+    """
+    DAY6 UX v3.
+
+    Evidence는 Learning 화면 상단에 항상 노출하고,
+    Investigation Board는 '동료 도움'과 '직접 문제 풀이'만 선택하게 한다.
+
+    require_companion_before_deduce 인자는 기존 호출 호환성을 위해 유지하지만
+    더 이상 문제 풀이를 잠그지 않는다.
+    """
+    _ = require_companion_before_deduce
+
     if default_action not in _ACTION_ORDER:
-        default_action = ACTION_CLUE
+        default_action = ACTION_DEDUCE
 
-    selected_key = get_investigation_selected_key(chapter_id, question_index)
-    active_key = get_investigation_active_key(chapter_id, question_index)
-    visited_key = get_investigation_visited_key(chapter_id, question_index)
+    selected_key = get_investigation_selected_key(
+        chapter_id,
+        question_index,
+    )
+    active_key = get_investigation_active_key(
+        chapter_id,
+        question_index,
+    )
 
-    st.session_state.pop(_legacy_action_key(chapter_id, question_index), None)
+    st.session_state.pop(
+        _legacy_action_key(
+            chapter_id,
+            question_index,
+        ),
+        None,
+    )
 
-    selected_action = st.session_state.get(selected_key, default_action)
-    if selected_action not in _ACTION_ORDER:
-        selected_action = default_action
-    st.session_state[selected_key] = selected_action
+    stale_selected = st.session_state.get(
+        selected_key
+    )
+    if stale_selected not in _ACTION_ORDER:
+        st.session_state.pop(
+            selected_key,
+            None,
+        )
 
-    active_action = st.session_state.get(active_key)
+    active_action = st.session_state.get(
+        active_key
+    )
     if active_action not in _ACTION_ORDER:
         active_action = None
-        st.session_state.pop(active_key, None)
+        st.session_state.pop(
+            active_key,
+            None,
+        )
 
-    visited_actions = set(st.session_state.get(visited_key, []))
-    _inject_board_css(theme)
+    _inject_board_css(
+        theme
+    )
 
-    st.markdown('<div class="inv-board-heading">INVESTIGATION</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="inv-board-heading">INVESTIGATION</div>',
+        unsafe_allow_html=True,
+    )
+
     if context_meta:
         st.markdown(
             f'<div class="inv-compact-meta">{html.escape(context_meta)}</div>',
             unsafe_allow_html=True,
         )
 
-    # 첫 행동을 실행하기 전까지만 큰 4:3 carousel을 보여준다.
-    if active_action is None:
-        st.markdown(
-            '<div class="inv-board-copy">카드를 고른 뒤 행동 버튼을 눌러 실행합니다.</div>',
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        '<div class="inv-board-copy">'
+        '단서는 위에서 바로 확인할 수 있습니다. '
+        '필요하면 동료의 도움을 받거나 바로 문제를 풀어보세요.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        selected_index = _ACTION_ORDER.index(selected_action)
-        ordered = (
-            _ACTION_ORDER[(selected_index - 1) % len(_ACTION_ORDER)],
-            selected_action,
-            _ACTION_ORDER[(selected_index + 1) % len(_ACTION_ORDER)],
-        )
-        columns = st.columns([1, 1.22, 1], gap="small")
+    columns = st.columns(
+        len(_ACTION_ORDER),
+        gap="small",
+    )
 
-        for position, (column, action) in enumerate(zip(columns, ordered)):
-            icon, label, _ = _action_meta(
-                theme=theme,
-                guide_name=guide_name,
-                action=action,
-            )
-            is_center = position == 1
-            slot_class = "inv-card-center" if is_center else "inv-card-side"
-            with column:
-                st.markdown(
-                    f'<span class="inv-card-marker {slot_class}"></span>',
-                    unsafe_allow_html=True,
-                )
-                pressed = st.button(
-                    f"{icon}\n\n{label}",
-                    key=f"investigation_select_{chapter_id}_{question_index}_{action}",
-                    use_container_width=True,
-                )
-                if pressed and action != selected_action:
-                    st.session_state[selected_key] = action
-                    st.rerun()
-
-        selected_icon, selected_label, selected_cta = _action_meta(
+    for column, action in zip(
+        columns,
+        _ACTION_ORDER,
+    ):
+        icon, _, _ = _action_meta(
             theme=theme,
             guide_name=guide_name,
-            action=selected_action,
+            action=action,
         )
-        st.markdown(
-            '<div class="inv-selection-state">'
-            f'<span>선택 · <strong>{html.escape(selected_icon)} {html.escape(selected_label)}</strong></span>'
-            '</div>'
-            f'<div class="inv-selection-description">{html.escape(_ACTION_DESCRIPTIONS[selected_action])}</div>',
-            unsafe_allow_html=True,
+        label = _compact_action_label(
+            theme=theme,
+            guide_name=guide_name,
+            action=action,
         )
-    else:
-        # 실제 행동을 실행한 뒤에는 큰 carousel을 치우고 3개의 compact action nav만 유지한다.
-        columns = st.columns(3, gap="small")
-        for column, action in zip(columns, _ACTION_ORDER):
-            icon, _, _ = _action_meta(
-                theme=theme,
-                guide_name=guide_name,
-                action=action,
-            )
-            label = _compact_action_label(
-                theme=theme,
-                guide_name=guide_name,
-                action=action,
-            )
-            marker_classes = ["inv-compact-marker"]
-            if action == active_action:
-                marker_classes.append("inv-compact-active")
-            if action == selected_action:
-                marker_classes.append("inv-compact-selected")
 
-            with column:
-                st.markdown(
-                    f'<span class="{" ".join(marker_classes)}"></span>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(
-                    f"{icon} {label}",
-                    key=f"investigation_compact_select_{chapter_id}_{question_index}_{action}",
-                    use_container_width=True,
-                ) and action != selected_action:
-                    st.session_state[selected_key] = action
+        marker_classes = [
+            "inv-compact-marker"
+        ]
+        if action == active_action:
+            marker_classes.append(
+                "inv-compact-active"
+            )
+
+        with column:
+            st.markdown(
+                f'<span class="{" ".join(marker_classes)}"></span>',
+                unsafe_allow_html=True,
+            )
+
+            if st.button(
+                f"{icon} {label}",
+                key=(
+                    f"investigation_direct_"
+                    f"{chapter_id}_{question_index}_{action}"
+                ),
+                use_container_width=True,
+                type=(
+                    "primary"
+                    if action == ACTION_DEDUCE
+                    and active_action is None
+                    else "secondary"
+                ),
+            ):
+                if action != active_action:
+                    set_investigation_action(
+                        chapter_id=chapter_id,
+                        question_index=question_index,
+                        action=action,
+                    )
+                    st.session_state[
+                        selected_key
+                    ] = action
                     st.rerun()
 
+    if active_action is not None:
         active_icon, active_label, _ = _action_meta(
             theme=theme,
             guide_name=guide_name,
@@ -687,43 +708,10 @@ def render_investigation_board(
         )
         st.markdown(
             '<div class="inv-active-badge">현재 · '
-            f'<strong>{html.escape(active_icon)} {html.escape(active_label)}</strong>'
+            f'<strong>{html.escape(active_icon)} '
+            f'{html.escape(active_label)}</strong>'
             '</div>',
             unsafe_allow_html=True,
         )
-
-        selected_icon, selected_label, selected_cta = _action_meta(
-            theme=theme,
-            guide_name=guide_name,
-            action=selected_action,
-        )
-
-    companion_required = (
-        require_companion_before_deduce
-        and selected_action == ACTION_DEDUCE
-        and ACTION_COMPANION not in visited_actions
-    )
-
-    if active_action != selected_action:
-        st.markdown('<span class="inv-action-cta-marker"></span>', unsafe_allow_html=True)
-        if companion_required:
-            st.button(
-                "🐈 먼저 동료와 대화해 핵심 개념을 확인하세요",
-                key=f"investigation_action_locked_{chapter_id}_{question_index}",
-                disabled=True,
-                use_container_width=True,
-            )
-        elif st.button(
-            f"{selected_icon} {selected_cta}",
-            key=f"investigation_execute_{chapter_id}_{question_index}_{selected_action}",
-            use_container_width=True,
-            type="primary",
-        ):
-            set_investigation_action(
-                chapter_id=chapter_id,
-                question_index=question_index,
-                action=selected_action,
-            )
-            st.rerun()
 
     return active_action

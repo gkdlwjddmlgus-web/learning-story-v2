@@ -6,6 +6,10 @@ import time
 
 import streamlit as st
 
+from components.generated_text_readability import generated_text_readability_css
+
+# DAY6_GENERATED_TEXT_READABILITY_V1_1
+
 
 # DAY5_STORY_CINEMATIC_V10_RELAXED_STORY_HOLD
 _THEME_STYLE = {
@@ -210,6 +214,10 @@ def _mark_seen(chapter_id: int) -> None:
 
 
 def _inject_css(theme: str) -> None:
+    st.markdown(
+        generated_text_readability_css(),
+        unsafe_allow_html=True,
+    )
     style = _THEME_STYLE.get(theme, _THEME_STYLE["동화"])
     # 미스터리는 사건 기록을 직접 읽는 느낌을 위해 손글씨/명조 계열 local font를 우선한다.
     # 해당 글꼴이 설치되어 있지 않으면 Batang/serif로 안전하게 fallback한다.
@@ -776,6 +784,10 @@ def _render_manual_cinematic(
 
 
 def render_story_review(*, story_text: str) -> None:
+    st.markdown(
+        generated_text_readability_css(),
+        unsafe_allow_html=True,
+    )
     paragraphs = _split_story_paragraphs(story_text)
     with st.expander("📖 스토리 다시보기", expanded=False):
         paragraphs_html = "".join(

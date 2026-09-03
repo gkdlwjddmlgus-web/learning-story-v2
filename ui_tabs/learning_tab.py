@@ -10,6 +10,21 @@ import traceback
 
 import streamlit as st
 
+from components.quiz_scene_experience import (
+    render_quiz_feedback_dialogue,
+    render_quiz_question_scene,
+    render_quiz_result_narration,
+)
+
+from components.dialogue_interaction import (
+    render_dialogue_interaction,
+)
+from services.dialogue_asset_service import (
+    resolve_portrait,
+)
+
+from components.generated_text_readability import generated_text_readability_css
+
 from components.learning_compact_ui import (
     render_compact_chapter_header,
 )
@@ -25,6 +40,12 @@ from components.investigation_board import (
 from components.story_cinematic import (
     render_story_experience,
     should_render_story_cinematic,
+)
+from components.dialogue_story_experience import (
+    render_dialogue_story_experience,
+)
+from services.dialogue_runtime_service import (
+    should_render_dialogue_story,
 )
 from components.text_utils import (
     format_inline_text,
@@ -224,6 +245,33 @@ def _render_bubble(
         unsafe_allow_html=True,
     )
 
+def _render_character_interaction(
+    *,
+    theme: str,
+    speaker_type: str,
+    speaker_name: str,
+    message: str,
+    tone: str = "neutral",
+) -> None:
+    # DAY6_LEARNING_DIALOGUE_INTERACTION_V1
+# DAY6_QUIZ_SCENE_INTERACTION_V2
+# DAY6_QUIZ_RESULT_EPILOGUE_V1
+    portrait_path = resolve_portrait(
+        theme,
+        speaker_type,
+        character_id="default",
+    )
+
+    render_dialogue_interaction(
+        theme=theme,
+        speaker_type=speaker_type,
+        speaker_name=speaker_name,
+        text=message,
+        portrait_path=portrait_path,
+        tone=tone,
+    )
+
+
 
 def _sanitize_learning_text(
     text: str | None,
@@ -351,6 +399,7 @@ def _render_learning_materials(
     learner_level: str,
     difficulty: str,
     question: dict,
+    guide_name: str | None = None,
     section: str = "all",
 ) -> None:
     # DAY5_INVESTIGATION_BOARD_V1_INTEGRATION
@@ -375,20 +424,33 @@ def _render_learning_materials(
     )
 
     if concept_brief and section in {"all", ACTION_COMPANION}:
-        if ui_mode in {"guided", "supported"}:
-            with st.container(border=True):
-                st.markdown("**💡 먼저 알아둘 개념**")
-                st.markdown(
-                    f"<div style='font-size:1.02rem;line-height:1.75;'>"
-                    f"{html.escape(concept_brief)}</div>",
-                    unsafe_allow_html=True,
-                )
+        if section == ACTION_COMPANION:
+            _render_character_interaction(
+                theme=theme,
+                speaker_type="companion",
+                speaker_name=(guide_name or "고양이"),
+                message=concept_brief,
+                tone="neutral",
+            )
+            if ui_mode in {"guided", "supported"}:
                 st.caption(
                     f"{support['display_name']} · 사고 수준 {reasoning['label']}"
                 )
         else:
-            with st.expander("💡 필요하면 개념 도움 보기", expanded=False):
-                st.write(concept_brief)
+            if ui_mode in {"guided", "supported"}:
+                with st.container(border=True):
+                    st.markdown("**💡 먼저 알아둘 개념**")
+                    st.markdown(
+                        f"<div style='font-size:1.02rem;line-height:1.75;'>"
+                        f"{html.escape(concept_brief)}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        f"{support['display_name']} · 사고 수준 {reasoning['label']}"
+                    )
+            else:
+                with st.expander("💡 필요하면 개념 도움 보기", expanded=False):
+                    st.write(concept_brief)
 
     if evidence_summary and section in {"all", ACTION_CLUE}:
         with st.container(border=True):
@@ -420,9 +482,445 @@ def _render_learning_materials(
                 )
 
     if evidence_help and section in {"all", ACTION_COMPANION}:
-        with st.expander(profile["help_label"], expanded=False):
-            st.write(evidence_help)
+        _render_theme_help_details(
+            theme=theme,
+            label=profile["help_label"],
+            text=evidence_help,
+        )
 
+# DAY6_INVESTIGATION_FLOW_UX_V3
+# DAY6_EVIDENCE_THEME_CARD_V1
+# DAY6_STICKY_EVIDENCE_NARRATION_SCENE_V1
+# DAY6_THEME_HELP_DETAILS_V1
+# DAY6_DARK_THEME_READABILITY_V1
+# DAY6_QUIZ_CHOICE_CARD_UI_V1
+# DAY6_QUIZ_CHOICE_CARD_UI_V1_1
+# DAY6_QUIZ_COLUMN_LAYOUT_V1
+# DAY6_QUIZ_COLUMN_LAYOUT_INDEX_ORDER_FIX_V1
+# DAY6_QUIZ_QUESTION_COLUMN_ALIGN_V1
+# DAY6_GENERATED_TEXT_READABILITY_V1_1
+_THEME_EVIDENCE_LABELS = {
+    "동화": "📖 이야기 속 단서",
+    "판타지": "📜 발견한 기록",
+    "SF": "📡 수집된 기록",
+    "무협": "📜 발견한 흔적",
+    "미스터리": "🔎 사건 단서",
+}
+
+
+def _render_fixed_question_evidence(
+    *,
+    theme: str,
+    question: dict,
+) -> None:
+    """
+    Evidence는 선택형 힌트가 아니라 문제 판단에 필요한 관찰 자료다.
+
+    DAY6 Double Sticky Compact Tuning v1:
+    - Evidence / Question double-sticky 구조는 유지한다.
+    - Evidence 높이를 고정해 Question의 sticky offset과 실제 높이를 일치시킨다.
+    - 긴 Evidence는 카드 내부에서 스크롤한다.
+    - 둘 사이 간격은 거의 붙어 보일 정도로 최소화한다.
+    """
+    evidence_summary = _sanitize_learning_text(
+        question.get("evidence_summary")
+    )
+    evidence_context = _sanitize_learning_text(
+        question.get("evidence_context")
+    )
+
+    if not evidence_summary and not evidence_context:
+        return
+
+    label = _THEME_EVIDENCE_LABELS.get(
+        theme,
+        "🔎 확인할 단서",
+    )
+
+    theme_style = {
+        "동화": {
+            "background": (
+                "linear-gradient(135deg, "
+                "rgba(255,250,247,.98), "
+                "rgba(255,236,241,.97) 55%, "
+                "rgba(236,250,244,.96))"
+            ),
+            "border": "#e9a8b8",
+            "accent": "#e66f8d",
+            "title": "#8a4057",
+            "text": "#513d43",
+            "shadow": "rgba(171,108,125,.16)",
+        },
+        "판타지": {
+            "background": (
+                "linear-gradient(135deg, "
+                "rgba(29,25,48,.98), "
+                "rgba(50,38,79,.97))"
+            ),
+            "border": "#8f79c5",
+            "accent": "#c0a5ff",
+            "title": "#e7dcff",
+            "text": "#f4efff",
+            "shadow": "rgba(111,87,173,.30)",
+        },
+        "SF": {
+            "background": (
+                "linear-gradient(135deg, "
+                "rgba(5,31,47,.98), "
+                "rgba(7,55,70,.97))"
+            ),
+            "border": "#2cb6cc",
+            "accent": "#5de3f5",
+            "title": "#aaf4ff",
+            "text": "#e9fbff",
+            "shadow": "rgba(29,174,195,.26)",
+        },
+        "무협": {
+            "background": (
+                "linear-gradient(135deg, "
+                "rgba(250,243,225,.99), "
+                "rgba(239,224,190,.97))"
+            ),
+            "border": "#b98a51",
+            "accent": "#9d3b32",
+            "title": "#6c342f",
+            "text": "#473c31",
+            "shadow": "rgba(120,88,52,.18)",
+        },
+        "미스터리": {
+            "background": (
+                "linear-gradient(135deg, "
+                "rgba(31,29,30,.99), "
+                "rgba(54,44,39,.98))"
+            ),
+            "border": "#a88758",
+            "accent": "#d6b475",
+            "title": "#f1d7a7",
+            "text": "#f4eee5",
+            "shadow": "rgba(38,27,22,.32)",
+        },
+    }.get(
+        theme,
+        {
+            "background": "rgba(255,255,255,.98)",
+            "border": "#c9c9c9",
+            "accent": "#777777",
+            "title": "#333333",
+            "text": "#444444",
+            "shadow": "rgba(0,0,0,.12)",
+        },
+    )
+
+    summary_html = ""
+    if evidence_summary:
+        summary_html = (
+            '<div class="day6-sticky-evidence-summary">'
+            f'{html.escape(evidence_summary)}'
+            '</div>'
+        )
+
+    context_html = ""
+    if evidence_context:
+        context_html = (
+            '<div class="day6-sticky-evidence-context">'
+            f'{html.escape(evidence_context)}'
+            '</div>'
+        )
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            /*
+            실제 Evidence 높이와 Question sticky offset을 동일 계열 값으로 맞춘다.
+            이전 값은 Evidence max-height(9.25rem)를 기준으로 잡아
+            짧은 단서에서 실제 카드보다 큰 빈 공간이 생길 수 있었다.
+            */
+            --day6-evidence-stack-offset: 7.20rem;
+            --day6-evidence-stack-offset-mobile: 5.90rem;
+        }}
+
+        div[data-testid="stElementContainer"]:has(
+            .day6-sticky-evidence-card
+        ) {{
+            position: sticky !important;
+            top: 3.85rem !important;
+            z-index: 720 !important;
+            width: min(100%, 1120px) !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+        }}
+
+        .day6-sticky-evidence-card {{
+            position: relative;
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: 7.05rem;
+            max-height: 7.05rem;
+            box-sizing: border-box;
+            border-radius: 15px;
+            padding: .70rem .96rem .72rem 1.18rem;
+            background: {theme_style["background"]};
+            border: 1px solid {theme_style["border"]};
+            box-shadow: 0 8px 21px {theme_style["shadow"]};
+            scrollbar-width: thin;
+        }}
+
+        .day6-sticky-evidence-accent {{
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            background: {theme_style["accent"]};
+        }}
+
+        .day6-sticky-evidence-title {{
+            display: flex;
+            align-items: center;
+            gap: .34rem;
+            margin-bottom: .26rem;
+            color: {theme_style["title"]};
+            font-size: .96rem;
+            line-height: 1.30;
+            font-weight: 850;
+        }}
+
+        .day6-sticky-evidence-summary {{
+            color: {theme_style["text"]};
+            font-size: .89rem;
+            line-height: 1.48;
+            font-weight: 720;
+            word-break: keep-all;
+            overflow-wrap: break-word;
+            line-break: strict;
+        }}
+
+        .day6-sticky-evidence-context {{
+            margin-top: .22rem;
+            color: {theme_style["text"]};
+            font-size: .85rem;
+            line-height: 1.44;
+            opacity: .90;
+            word-break: keep-all;
+            overflow-wrap: break-word;
+            line-break: strict;
+        }}
+
+        @media (max-width: 760px) {{
+            div[data-testid="stElementContainer"]:has(
+                .day6-sticky-evidence-card
+            ) {{
+                top: 3.45rem !important;
+            }}
+
+            .day6-sticky-evidence-card {{
+                height: 5.75rem;
+                max-height: 5.75rem;
+                padding: .52rem .66rem .55rem .84rem;
+                border-radius: 12px;
+            }}
+
+            .day6-sticky-evidence-title {{
+                margin-bottom: .15rem;
+                font-size: .83rem;
+            }}
+
+            .day6-sticky-evidence-summary {{
+                font-size: .78rem;
+                line-height: 1.38;
+            }}
+
+            .day6-sticky-evidence-context {{
+                margin-top: .14rem;
+                font-size: .75rem;
+                line-height: 1.36;
+            }}
+        }}
+        </style>
+
+        <section class="day6-sticky-evidence-card">
+            <div class="day6-sticky-evidence-accent"></div>
+            <div class="day6-sticky-evidence-title">
+                {html.escape(label)}
+            </div>
+            {summary_html}
+            {context_html}
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
+
+
+
+
+
+# DAY6_THEME_HELP_DETAILS_V1
+_THEME_HELP_DETAILS_STYLE = {
+    "동화": {
+        "surface": "rgba(255,248,250,.97)",
+        "surface_open": "rgba(255,240,245,.98)",
+        "border": "#e7a6b6",
+        "accent": "#df6c88",
+        "text": "#563d46",
+        "muted": "#8a6670",
+        "shadow": "rgba(178,111,130,.13)",
+    },
+    "판타지": {
+        "surface": "rgba(30,28,38,.97)",
+        "surface_open": "rgba(36,33,46,.98)",
+        "border": "#675f78",
+        "accent": "#aa9bc8",
+        "text": "#ebe7f1",
+        "muted": "#bdb6c9",
+        "shadow": "rgba(38,31,54,.20)",
+    },
+    "SF": {
+        "surface": "rgba(10,27,35,.97)",
+        "surface_open": "rgba(12,33,42,.98)",
+        "border": "#496d76",
+        "accent": "#83b7c0",
+        "text": "#e8f0f2",
+        "muted": "#b5c8cc",
+        "shadow": "rgba(19,55,64,.20)",
+    },
+    "무협": {
+        "surface": "rgba(248,240,221,.97)",
+        "surface_open": "rgba(241,228,199,.98)",
+        "border": "#b38a56",
+        "accent": "#9c3f35",
+        "text": "#493b30",
+        "muted": "#7f6a55",
+        "shadow": "rgba(121,91,57,.14)",
+    },
+    "미스터리": {
+        "surface": "rgba(35,31,30,.97)",
+        "surface_open": "rgba(47,40,37,.98)",
+        "border": "#9f825a",
+        "accent": "#d1ad70",
+        "text": "#f4eee4",
+        "muted": "#d2c2ac",
+        "shadow": "rgba(24,18,16,.28)",
+    },
+}
+
+
+def _render_theme_help_details(
+    *,
+    theme: str,
+    label: str,
+    text: str,
+) -> None:
+    """
+    용어/시스템 도움은 기본 CLOSED 상태를 유지하면서,
+    펼친 뒤에도 Streamlit 기본 흰 배경이 드러나지 않게
+    테마 전용 <details> 카드로 렌더한다.
+    """
+    style = _THEME_HELP_DETAILS_STYLE.get(
+        theme,
+        {
+            "surface": "rgba(255,255,255,.96)",
+            "surface_open": "rgba(248,248,248,.98)",
+            "border": "#c8c8c8",
+            "accent": "#777777",
+            "text": "#333333",
+            "muted": "#666666",
+            "shadow": "rgba(0,0,0,.10)",
+        },
+    )
+
+    safe_label = html.escape(
+        str(label or "용어 도움")
+    )
+    safe_text = html.escape(
+        str(text or "")
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        details.day6-theme-help {{
+            width: 100%;
+            border: 1px solid {style["border"]};
+            border-radius: 14px;
+            background: {style["surface"]};
+            box-shadow: 0 7px 20px {style["shadow"]};
+            overflow: hidden;
+            transition:
+                background .18s ease,
+                border-color .18s ease,
+                box-shadow .18s ease;
+        }}
+
+        details.day6-theme-help[open] {{
+            background: {style["surface_open"]};
+        }}
+
+        details.day6-theme-help > summary {{
+            list-style: none;
+            cursor: pointer;
+            position: relative;
+            padding: .92rem 1.15rem .92rem 2.35rem;
+            color: {style["accent"]};
+            font-weight: 800;
+            line-height: 1.5;
+            user-select: none;
+        }}
+
+        details.day6-theme-help > summary::-webkit-details-marker {{
+            display: none;
+        }}
+
+        details.day6-theme-help > summary::before {{
+            content: "⌄";
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-52%);
+            color: {style["accent"]};
+            font-size: 1rem;
+            font-weight: 900;
+            transition: transform .16s ease;
+        }}
+
+        details.day6-theme-help[open] > summary::before {{
+            transform: translateY(-52%) rotate(180deg);
+        }}
+
+        details.day6-theme-help > summary::after {{
+            content: "";
+            position: absolute;
+            left: 1.15rem;
+            right: 1.15rem;
+            bottom: 0;
+            height: 1px;
+            background: {style["border"]};
+            opacity: .42;
+        }}
+
+        details.day6-theme-help > .day6-theme-help-body {{
+            padding: .95rem 1.15rem 1.05rem 1.15rem;
+            color: {style["text"]};
+            font-size: 1rem;
+            line-height: 1.8;
+            background: transparent;
+        }}
+
+        details.day6-theme-help > .day6-theme-help-body strong {{
+            color: {style["accent"]};
+        }}
+        </style>
+
+        <details class="day6-theme-help">
+            <summary>{safe_label}</summary>
+            <div class="day6-theme-help-body">{safe_text}</div>
+        </details>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def _render_chapter_story(
     *,
@@ -481,8 +979,48 @@ def _render_chapter_story(
         + 1
     )
 
+    # DAY6_DIALOGUE_RUNTIME_V1_INTEGRATION
+    # Feature gate가 켜져 있으면 기존 plain-text Story를 Dialogue Scene UI로 먼저 재생한다.
+    # 원문/DB/AI Prompt는 변경하지 않으며, 종료 시 기존 Story seen key를 공유해
+    # 같은 Chapter에서 기존 Cinematic이 다시 중복 재생되지 않게 한다.
+    if should_render_dialogue_story(
+        chapter_id=chapter[0],
+        story_text=chapter[4],
+    ):
+        dialogue_active = render_dialogue_story_experience(
+            chapter_id=chapter[0],
+            theme=world[4],
+            story_text=chapter[4],
+            chapter_number=chapter[2],
+            chapter_title=format_inline_text(chapter[3]),
+            guide_name=(
+                world[9]
+                if len(world) > 9
+                else None
+            ),
+        )
+
+        if dialogue_active:
+            queue_once(
+                key=f"story_open_{chapter[0]}",
+                event_type="story_open",
+                user_id=user["user_id"],
+                world_id=world[0],
+                story_arc_id=(arc["id"] if arc else None),
+                chapter_id=chapter[0],
+                metadata={
+                    "theme": world[4],
+                    "chapter_number": chapter[2],
+                    "story_phase": phase,
+                    "story_length": len(chapter[4] or ""),
+                    "presentation": "dialogue_runtime_v1",
+                },
+                flush=True,
+            )
+            return True
+
     # DAY5_STORY_CINEMATIC_V2_DEDICATED_INTEGRATION
-    # Cinematic이 필요한 동안에는 Chapter heading/progress/학습 UI보다 먼저 화면을 독점한다.
+    # Dialogue Runtime이 꺼져 있거나 적용되지 않으면 기존 Cinematic으로 그대로 fallback한다.
     if should_render_story_cinematic(
         chapter_id=chapter[0],
         story_text=chapter[4],
@@ -1067,12 +1605,287 @@ def render_chapter_complete(
                 )
 
 
+# DAY6_DARK_THEME_READABILITY_V1
+def _inject_dark_quiz_readability_css(
+    theme: str,
+) -> None:
+    """
+    판타지/SF의 dark-base 화면에서 Streamlit Radio option label이
+    전역 테마 색상과 충돌해 어둡게 보이는 문제를 quiz scope에서 보정한다.
+    """
+    if theme not in {
+        "판타지",
+        "SF",
+    }:
+        return
+
+    if theme == "판타지":
+        option_text = "#f2edf8"
+        option_muted = "#ddd5e8"
+    else:
+        option_text = "#eef9fb"
+        option_muted = "#cfe3e7"
+
+    st.markdown(
+        f"""
+        <style>
+        div[data-testid="stRadio"] > label,
+        div[data-testid="stRadio"] > label p {{
+            color: {option_muted} !important;
+            opacity: 1 !important;
+        }}
+
+        div[data-testid="stRadio"] div[role="radiogroup"] label,
+        div[data-testid="stRadio"] div[role="radiogroup"] label p,
+        div[data-testid="stRadio"] div[role="radiogroup"]
+            [data-testid="stMarkdownContainer"],
+        div[data-testid="stRadio"] div[role="radiogroup"]
+            [data-testid="stMarkdownContainer"] p {{
+            color: {option_text} !important;
+            opacity: 1 !important;
+            -webkit-text-fill-color: {option_text} !important;
+        }}
+
+        div[role="radiogroup"] label,
+        div[role="radiogroup"] label p {{
+            color: {option_text} !important;
+            opacity: 1 !important;
+            -webkit-text-fill-color: {option_text} !important;
+        }}
+
+        div[data-testid="stRadio"] label[data-baseweb="radio"] {{
+            color: {option_text} !important;
+            opacity: 1 !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# DAY6_QUIZ_CHOICE_CARD_UI_V1
+def _inject_quiz_choice_card_css(
+    theme: str,
+    *,
+    chapter_id: int,
+    question_index: int,
+) -> None:
+    """
+    Quiz Choice Card UI v1.2
+    문제 제목 / 보기 / 응답 버튼을 하나의 안정적인 Quiz Column 폭으로 묶는다.
+
+    - desktop: max-width 1120px
+    - mobile/tablet: available width 100%
+    - 선택지 길이에 따라 박스 폭이 흔들리지 않음
+    - 내부 텍스트는 좌측 정렬 유지
+    - v1.1의 low-contrast answer-row 스타일 유지
+    """
+    palette = {
+        "동화": {
+            "surface": "rgba(255,255,255,.34)",
+            "hover": "rgba(255,246,248,.58)",
+            "selected": "rgba(252,235,240,.70)",
+            "border": "rgba(211,155,170,.42)",
+            "accent": "#d8738d",
+            "text": "#4f3841",
+        },
+        "판타지": {
+            "surface": "rgba(255,255,255,.025)",
+            "hover": "rgba(255,255,255,.055)",
+            "selected": "rgba(171,147,196,.10)",
+            "border": "rgba(168,148,188,.26)",
+            "accent": "#aa94c4",
+            "text": "#f0ebf4",
+        },
+        "SF": {
+            "surface": "rgba(255,255,255,.025)",
+            "hover": "rgba(255,255,255,.05)",
+            "selected": "rgba(91,177,194,.10)",
+            "border": "rgba(87,153,166,.28)",
+            "accent": "#62b8c7",
+            "text": "#edf8fa",
+        },
+        "무협": {
+            "surface": "rgba(255,255,255,.30)",
+            "hover": "rgba(247,239,222,.55)",
+            "selected": "rgba(224,204,172,.56)",
+            "border": "rgba(165,132,91,.34)",
+            "accent": "#985245",
+            "text": "#493a2f",
+        },
+        "미스터리": {
+            "surface": "rgba(255,255,255,.025)",
+            "hover": "rgba(255,255,255,.05)",
+            "selected": "rgba(190,158,103,.09)",
+            "border": "rgba(160,134,92,.27)",
+            "accent": "#b89a69",
+            "text": "#f0e9df",
+        },
+    }.get(
+        theme,
+        {
+            "surface": "rgba(255,255,255,.28)",
+            "hover": "rgba(255,255,255,.46)",
+            "selected": "rgba(230,230,230,.58)",
+            "border": "rgba(150,150,150,.32)",
+            "accent": "#777777",
+            "text": "#333333",
+        },
+    )
+
+    radio_key_class = (
+        f".st-key-question_{chapter_id}_{question_index}"
+    )
+    submit_key_class = (
+        f".st-key-submit_{chapter_id}_{question_index}"
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        :root {{
+            --day6-quiz-column-width: 1120px;
+        }}
+
+        /* Question / answers / submit = one reading column */
+        .quest-question {{
+            display: block !important;
+            width: min(100%, var(--day6-quiz-column-width)) !important;
+            max-width: var(--day6-quiz-column-width) !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            margin-top: .30rem !important;
+            margin-bottom: .72rem !important;
+            box-sizing: border-box !important;
+            text-align: left !important;
+            font-size: clamp(1.48rem, 1.8vw, 1.82rem) !important;
+            font-weight: 800 !important;
+            line-height: 1.28 !important;
+            letter-spacing: -.025em !important;
+        }}
+
+        {radio_key_class},
+        {submit_key_class} {{
+            width: min(100%, var(--day6-quiz-column-width)) !important;
+            max-width: var(--day6-quiz-column-width) !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            box-sizing: border-box !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"] {{
+            width: 100% !important;
+            max-width: 100% !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"] div[role="radiogroup"] {{
+            width: 100% !important;
+            max-width: 100% !important;
+            gap: .34rem !important;
+        }}
+
+        /* v1.1 low-contrast answer-row styling */
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label {{
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
+            padding: .62rem .78rem !important;
+            border: 1px solid {palette["border"]} !important;
+            border-radius: 9px !important;
+            background: {palette["surface"]} !important;
+            box-shadow: none !important;
+            transition:
+                background .12s ease,
+                border-color .12s ease !important;
+            cursor: pointer !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label:hover {{
+            background: {palette["hover"]} !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label:has(input:checked),
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label:has([aria-checked="true"]) {{
+            background: {palette["selected"]} !important;
+            border-color: {palette["border"]} !important;
+            box-shadow:
+                inset 3px 0 0 {palette["accent"]} !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label,
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label p,
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label
+            [data-testid="stMarkdownContainer"],
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label
+            [data-testid="stMarkdownContainer"] p {{
+            color: {palette["text"]} !important;
+            -webkit-text-fill-color: {palette["text"]} !important;
+            opacity: 1 !important;
+            line-height: 1.5 !important;
+            text-align: left !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"] input[type="radio"] {{
+            accent-color: {palette["accent"]} !important;
+        }}
+
+        {radio_key_class} div[data-testid="stRadio"]
+            div[role="radiogroup"] > label:focus-within {{
+            outline: none !important;
+        }}
+
+        {submit_key_class} div[data-testid="stButton"],
+        {submit_key_class} button {{
+            width: 100% !important;
+            max-width: 100% !important;
+        }}
+
+        @media (max-width: 1180px) {{
+            :root {{
+                --day6-quiz-column-width: 100%;
+            }}
+
+            .quest-question,
+            {radio_key_class},
+            {submit_key_class} {{
+                width: 100% !important;
+                max-width: 100% !important;
+            }}
+        }}
+
+        @media (max-width: 760px) {{
+            {radio_key_class} div[data-testid="stRadio"]
+                div[role="radiogroup"] > label {{
+                padding: .58rem .68rem !important;
+                border-radius: 8px !important;
+            }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_quiz(
     *,
     user,
     world,
     chapter,
 ) -> None:
+    st.markdown(
+        generated_text_readability_css(),
+        unsafe_allow_html=True,
+    )
+    _inject_dark_quiz_readability_css(
+        world[4]
+    )
     if chapter[7]:
         render_chapter_complete(
             user=user,
@@ -1099,6 +1912,11 @@ def render_quiz(
     index = st.session_state.get(
         "question_index",
         0,
+    )
+    _inject_quiz_choice_card_css(
+        world[4],
+        chapter_id=chapter[0],
+        question_index=index,
     )
 
     if index >= len(
@@ -1191,47 +2009,48 @@ def render_quiz(
         False,
     )
 
-    # DAY5_INVESTIGATION_BOARD_V2_INTEGRATION
-    ui_mode = get_ui_support_mode(world[3])
-    default_action = (
-        ACTION_COMPANION
-        if ui_mode in {"guided", "supported"}
-        else ACTION_CLUE
+    # DAY6_INVESTIGATION_FLOW_UX_V3
+    # Evidence는 선택형 행동이 아니라 현재 문제의 고정 관찰 자료로 항상 먼저 보여준다.
+    _render_fixed_question_evidence(
+        theme=world[4],
+        question=question,
     )
+
     active_action = render_investigation_board(
         theme=world[4],
         guide_name=guide_name,
         chapter_id=chapter[0],
         question_index=index,
-        default_action=default_action,
-        require_companion_before_deduce=(
-            ui_mode in {"guided", "supported"}
-        ),
+        default_action=ACTION_DEDUCE,
+        require_companion_before_deduce=False,
         context_meta=investigation_meta,
     )
 
     if active_action is None:
         return
 
-    if active_action == ACTION_CLUE:
+    if active_action == ACTION_COMPANION:
+        # 동료는 Evidence를 반복하지 않고 개념 회상/용어 도움/사고 방향만 제공한다.
         _render_learning_materials(
             theme=world[4],
             learner_level=world[3],
             difficulty=(question.get("difficulty") or "basic"),
             question=question,
-            section=ACTION_CLUE,
-        )
-    elif active_action == ACTION_COMPANION:
-        _render_learning_materials(
-            theme=world[4],
-            learner_level=world[3],
-            difficulty=(question.get("difficulty") or "basic"),
-            question=question,
+            guide_name=guide_name,
             section=ACTION_COMPANION,
         )
     else:
         st.markdown(
-            f"### {format_inline_text(question['question'])}"
+            '<span class="inv-question-title-marker"></span>',
+            unsafe_allow_html=True,
+        )
+        render_quiz_question_scene(
+            theme=world[4],
+            chapter_number=chapter[2],
+            chapter_title=format_inline_text(chapter[3]),
+            question_number=index + 1,
+            question_count=len(questions),
+            question_text=format_inline_text(question["question"]),
         )
 
     if not question_submitted:
@@ -1402,29 +2221,6 @@ def render_quiz(
         )
     )
 
-    _render_bubble(
-        speaker=user_name,
-        message=user_answer_text,
-        bubble_type="user",
-        align="user",
-    )
-
-    if not st.session_state.get(
-        "show_npc_reply",
-        False,
-    ):
-        with st.spinner(
-            f"{guide_name}가 네 답을 바라보고 있습니다..."
-        ):
-            time.sleep(
-                0.55
-            )
-
-        st.session_state[
-            "show_npc_reply"
-        ] = True
-        st.rerun()
-
     feedback = (
         question.get(
             "correct_feedback"
@@ -1437,50 +2233,39 @@ def render_quiz(
 
     if not feedback:
         feedback = (
-            "좋은 선택이야!"
+            "응, 그 선택이 맞아. 다음 단서로 이어가보자."
             if is_correct
-            else "조금 헷갈렸던 것 같아. 같이 다시 보자."
+            else "조금 어긋난 것 같아. 방금 본 단서를 한 번 더 비교해볼까?"
         )
 
-    _render_bubble(
-        speaker=guide_name,
-        message=feedback,
-        bubble_type=(
-            "npc-correct"
-            if is_correct
-            else "npc-wrong"
-        ),
-        align="npc",
+    feedback_active = render_quiz_feedback_dialogue(
+        chapter_id=chapter[0],
+        question_index=index,
+        theme=world[4],
+        chapter_number=chapter[2],
+        question_number=index + 1,
+        user_name=user_name,
+        user_answer_text=user_answer_text,
+        guide_name=guide_name,
+        feedback=feedback,
+        is_correct=is_correct,
     )
 
+    if feedback_active:
+        return
     story_progress = _sanitize_learning_text(
         question.get("story_progress")
     )
 
     if story_progress:
-        experience_profile = get_theme_experience_profile(world[4])
-        is_conclusion_step = index == len(questions) - 1
-
-        if is_conclusion_step:
-            label = (
-                experience_profile["conclusion_label"]
-                if is_correct
-                else experience_profile["review_conclusion_label"]
-            )
-            if is_correct:
-                st.success(f"✨ {label} · {story_progress}")
-            else:
-                st.info(f"✨ {label} · {story_progress}")
-        else:
-            label = (
-                experience_profile["progress_label"]
-                if is_correct
-                else experience_profile["review_progress_label"]
-            )
-            if is_correct:
-                st.success(f"✨ {label} · {story_progress}")
-            else:
-                st.info(f"✨ {label} · {story_progress}")
+        render_quiz_result_narration(
+            theme=world[4],
+            text=story_progress,
+            is_correct=is_correct,
+            is_conclusion_step=(
+                index == len(questions) - 1
+            ),
+        )
 
     pack = get_theme_pack(
         world[4]
@@ -1502,15 +2287,19 @@ def render_quiz(
         )
     )
 
-    _render_learning_note(
-        label=pack[
-            "learning_note"
-        ],
-        explanation=explanation,
-        correct_answer=(
-            correct_answer
-        ),
-    )
+    with st.expander(
+        "📘 학습 노트 확인하기",
+        expanded=False,
+    ):
+        _render_learning_note(
+            label=pack[
+                "learning_note"
+            ],
+            explanation=explanation,
+            correct_answer=(
+                correct_answer
+            ),
+        )
 
     next_label = get_theme_experience_profile(world[4])["next_label"]
 
@@ -1617,10 +2406,16 @@ def render_learning_tab(
 
         return
 
-    # Dedicated Cinematic 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
-    if should_render_story_cinematic(
-        chapter_id=chapter[0],
-        story_text=chapter[4],
+    # Dedicated Story presentation 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
+    if (
+        should_render_dialogue_story(
+            chapter_id=chapter[0],
+            story_text=chapter[4],
+        )
+        or should_render_story_cinematic(
+            chapter_id=chapter[0],
+            story_text=chapter[4],
+        )
     ):
         _render_chapter_story(
             user=user,
@@ -1840,3 +2635,9 @@ def render_learning_tab(
         world=world,
         chapter=chapter,
     )
+
+# DAY6_SINGLE_STICKY_QUIZ_HUD_V1
+
+# DAY6_RESTORE_STACKED_STICKY_EVIDENCE_V1
+
+# DAY6_DOUBLE_STICKY_COMPACT_TUNING_V1

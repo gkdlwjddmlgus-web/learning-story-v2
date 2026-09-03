@@ -46,3 +46,28 @@ def generation_mode_label() -> str:
     if is_ai_mock_enabled():
         return "DEV AI MOCK"
     return "GEMINI LIVE"
+
+# DAY6_DIALOGUE_RUNTIME_FEATURE_GATE_V1
+def is_dialogue_runtime_enabled() -> bool:
+    """
+    Dialogue Scene Runtime v1 feature gate.
+
+    Local Git Bash:
+        DIALOGUE_SCENE_RUNTIME_V1=1 streamlit run app.py
+
+    Streamlit secrets:
+        DIALOGUE_SCENE_RUNTIME_V1 = true
+    """
+    env = os.getenv(
+        "DIALOGUE_SCENE_RUNTIME_V1"
+    )
+
+    if env is not None:
+        return _to_bool(env)
+
+    return _to_bool(
+        _secret(
+            "DIALOGUE_SCENE_RUNTIME_V1",
+            False,
+        )
+    )

@@ -7,11 +7,14 @@ from pathlib import Path
 
 import streamlit as st
 
+from components.generated_text_readability import generated_text_readability_css
+
 
 # DAY6_DIALOGUE_SCENE_UI_V1
 # DAY6_DIALOGUE_SCENE_UI_V1_1_POLISH
 # DAY6_DIALOGUE_SCENE_UI_V1_1_1_PLAYER_TEXT_ALIGN
 # DAY6_DIALOGUE_SCENE_UI_V1_1_2_HIDE_PLAYER_NAME
+# DAY6_GENERATED_TEXT_READABILITY_V1_1
 _SPEAKER_TYPES = {
     "companion",
     "player",
@@ -470,7 +473,8 @@ def render_dialogue_scene(
     )
 
     st.markdown(
-        _css(normalized_theme)
+        generated_text_readability_css()
+        + _css(normalized_theme)
         + (
             f'<section class="dialogue-scene-stage" style="{custom_background}">'
             f'{kicker_html}'

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import random
 
 import json
 import re
@@ -13,9 +14,13 @@ from services.experience_profile_service import (
 )
 from services.generation_gateway import generate_json
 
+from services.character_voice_service import build_companion_voice_rules
+
 
 QUESTION_COUNT = 5
-PROMPT_VERSION = "question_curriculum_v12_day4_strong_scaffolding_hotfix"
+PROMPT_VERSION = "question_curriculum_v13_day6_character_voice"
+# DAY6_CHARACTER_VOICE_STORY_DIALOGUE_PROMPT_V1
+# DAY6_QUIZ_CHOICE_RANDOMIZER_V1
 
 # 문제 5개는 Story 1개보다 출력량이 크므로 전역 60초보다 약간 긴 제한을 둔다.
 # ReadTimeout 이후 자동 재시도는 하지 않아 사용자가 2~3분 묶이는 것을 방지한다.
@@ -496,6 +501,44 @@ def _validate_questions(
     return questions
 
 
+def _randomize_question_choice_positions(
+    questions: list,
+    *,
+    rng=None,
+) -> list:
+    shuffler = rng or random.SystemRandom()
+
+    for index, item in enumerate(questions, start=1):
+        choices = list(item.get("choices") or [])
+        correct_index = item.get("correct_index")
+
+        if (
+            len(choices) != 4
+            or not isinstance(correct_index, int)
+            or not 0 <= correct_index <= 3
+        ):
+            raise ValueError(
+                f"{index}번 문제를 랜덤 배치할 수 없습니다."
+            )
+
+        tagged_choices = list(enumerate(choices))
+        shuffler.shuffle(tagged_choices)
+
+        item["choices"] = [
+            choice
+            for _old_index, choice in tagged_choices
+        ]
+
+        item["correct_index"] = next(
+            new_index
+            for new_index, (old_index, _choice)
+            in enumerate(tagged_choices)
+            if old_index == correct_index
+        )
+
+    return questions
+
+
 def generate_chapter_questions(
     topic: str,
     learner_level: str,
@@ -579,6 +622,12 @@ def generate_chapter_questions(
         ensure_ascii=False,
     )
 
+    companion_voice_rules = build_companion_voice_rules(
+        theme=theme,
+        guide_name=guide_name,
+        scope="learning",
+    )
+
     prompt = f"""
 너는 개인화 학습 Story 서비스의 Story-integrated Question Generator다.
 
@@ -636,6 +685,15 @@ Concept별 실제 문제 작성 규칙:
 [동료 고양이]
 이름: {guide_name or '이름 미지정'}
 {cat_tone}
+
+[DAY6 Character Voice - concept_brief / feedback에 우선 적용]
+{companion_voice_rules}
+- concept_brief는 UI에서 동료 고양이의 직접 발화로 표시된다. 정확한 학습 발판은 유지하되 교과서/강사 문장처럼 쓰지 않는다.
+- concept_brief에는 speaker 이름, 따옴표, '고양이가 말했다', 괄호형 행동지문을 넣지 않는다. UI가 화자와 초상화를 따로 표시한다.
+- correct_feedback은 같은 persona의 직접 발화 1~2문장이다. 짧은 감정 반응 + 사용자가 잘 본 관찰 포인트 하나까지만 말하고 재강의하지 않는다.
+- wrong_feedback은 같은 persona의 직접 발화 1~2문장이다. 정답을 먼저 말하지 않고 다시 볼 단서/비교 지점 하나를 질문이나 제안으로 건넨다.
+- '야옹!', '냐옹!', '맞아 냥!'을 습관적인 접두/접미사처럼 반복하지 않는다. 자연스러운 순간에만 드물게 쓸 수 있다.
+- explanation은 기존처럼 중립적인 학습 노트다. Character Voice를 억지로 넣지 않는다.
 
 문제 {QUESTION_COUNT}개를 한 번에 생성한다.
 
@@ -785,13 +843,16 @@ Concept별 실제 문제 작성 규칙:
             },
         )
 
-        return _validate_questions(
+        validated_questions = _validate_questions(
             result,
             target_concepts=target_concepts,
             requested_difficulty=requested_difficulty,
             expected_roles=expected_roles,
             current_open_threads=current_open_threads or [],
             adaptive_support=adaptive_support,
+        )
+        return _randomize_question_choice_positions(
+            validated_questions
         )
 
     except QuestionGenerationError:

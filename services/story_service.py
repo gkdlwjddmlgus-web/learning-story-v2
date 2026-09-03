@@ -13,10 +13,19 @@ from services.experience_profile_service import (
     enrich_interaction_outline,
 )
 
+from services.character_voice_service import (
+    build_companion_voice_rules,
+    build_story_dialogue_distribution_rules,
+)
+import re
+
 
 BLOCK_SIZE = 3
 OUTLINE_PROMPT_VERSION = "story_outline_v5_day3_personalization"
-CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v10_day4_stage_neutral_boundary"
+CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v13_day6_dialogue_integrity_gate"
+# DAY6_STORY_DIALOGUE_INTEGRITY_GATE_V1
+# DAY6_STORY_DIALOGUE_COHERENCE_V1
+# DAY6_CHARACTER_VOICE_STORY_DIALOGUE_PROMPT_V1
 
 
 
@@ -708,6 +717,209 @@ def _build_reasoning_safe_writer_outlines(
     }
     return safe_block, safe_chapter
 
+class StoryDialogueIntegrityError(ValueError):
+    """Story의 Player/Companion turn-taking가 깨진 경우 발생한다."""
+
+
+_DIALOGUE_DIRECT_QUOTE_PATTERN = re.compile(
+    r'[“"][^”"\n]+[”"]'
+)
+
+_DIALOGUE_PLAYER_HINT_PATTERN = re.compile(
+    r'(?:^|[\s,.!?])(?:나는|내가|우리는|우리가)(?:[\s,.!?]|$)'
+)
+
+_DIALOGUE_SPEECH_VERB_PATTERN = re.compile(
+    r'(?:말했|말하|대답|답했|물었|묻|외쳤|중얼|속삭|덧붙였|되물었)'
+)
+
+_DIALOGUE_SENTENCE_SPLIT_PATTERN = re.compile(
+    r'(?<=[.!?。！？])\s+|\n+'
+)
+
+
+def _story_dialogue_sentences(
+    story_text: str | None,
+) -> list[str]:
+    text = str(story_text or "").strip()
+    if not text:
+        return []
+
+    return [
+        sentence.strip()
+        for sentence in _DIALOGUE_SENTENCE_SPLIT_PATTERN.split(text)
+        if sentence.strip()
+    ]
+
+
+def _player_attribution_span(
+    sentence: str,
+):
+    """
+    Player 표지 뒤에서 실제 speech verb가 끝나는 위치까지 찾는다.
+
+    같은 sentence chunk 앞부분에 Companion quote가 붙어 있어도
+    그 quote를 Player의 직접 대사로 오인하지 않기 위한 기준점이다.
+    """
+    text = str(sentence or "").strip()
+
+    player_match = _DIALOGUE_PLAYER_HINT_PATTERN.search(
+        text
+    )
+    if not player_match:
+        return None
+
+    speech_match = _DIALOGUE_SPEECH_VERB_PATTERN.search(
+        text,
+        player_match.end(),
+    )
+    if not speech_match:
+        return None
+
+    return (
+        player_match.start(),
+        speech_match.end(),
+    )
+
+
+def _is_player_speech_attribution(
+    sentence: str,
+) -> bool:
+    return (
+        _player_attribution_span(
+            sentence
+        )
+        is not None
+    )
+
+
+def _has_direct_quote_after_player_attribution(
+    sentence: str,
+) -> bool:
+    text = str(sentence or "").strip()
+    span = _player_attribution_span(
+        text
+    )
+    if span is None:
+        return False
+
+    _start, attribution_end = span
+
+    return bool(
+        _DIALOGUE_DIRECT_QUOTE_PATTERN.search(
+            text,
+            attribution_end,
+        )
+    )
+
+
+def _starts_with_direct_quote(
+    sentence: str,
+) -> bool:
+    return str(sentence or "").lstrip().startswith(
+        ("“", '"')
+    )
+
+
+def _story_dialogue_integrity_issues(
+    story_text: str | None,
+    guide_name: str | None = None,
+) -> list[str]:
+    """
+    Hard fail:
+    1) Player 발화 attribution이 있는데 실제 대사가 없다.
+    2) Chapter 전체에 Player의 실제 직접 발화 turn이 없다.
+    """
+    sentences = _story_dialogue_sentences(
+        story_text
+    )
+    issues: list[str] = []
+    player_direct_turns = 0
+
+    for index, sentence in enumerate(
+        sentences
+    ):
+        if not _is_player_speech_attribution(
+            sentence
+        ):
+            continue
+
+        if _has_direct_quote_after_player_attribution(
+            sentence
+        ):
+            player_direct_turns += 1
+            continue
+
+        next_sentence = (
+            sentences[index + 1]
+            if index + 1 < len(sentences)
+            else ""
+        )
+
+        if (
+            next_sentence
+            and _starts_with_direct_quote(
+                next_sentence
+            )
+        ):
+            player_direct_turns += 1
+            continue
+
+        preview = sentence
+        if len(preview) > 90:
+            preview = preview[:87] + "..."
+
+        issues.append(
+            "player_attribution_without_direct_quote: "
+            + preview
+        )
+
+    if player_direct_turns < 1:
+        issues.append(
+            "player_direct_dialogue_missing"
+        )
+
+    return issues
+
+
+def _story_dialogue_repair_prompt(
+    issues: list[str],
+    *,
+    guide_name: str | None,
+) -> str:
+    guide = str(
+        guide_name or "동료 고양이"
+    ).strip()
+
+    issue_text = "\n".join(
+        f"- {issue}"
+        for issue in issues
+    )
+
+    return f"""
+[DAY6 Dialogue Integrity Repair Retry]
+직전 Story 생성물은 Dialogue Integrity 검사에 실패했다.
+아래 문제만 고치되 기존 Chapter의 사건, 관찰 사실, 학습 경계,
+target Concept, Story State update 의미는 바꾸지 않는다.
+
+검출된 문제:
+{issue_text}
+
+반드시 지킬 것:
+- '{guide}'의 질문/발화 뒤 Player가 반응하는 turn을 만들었다면
+  '내가 대답했다/말했다/물었다'라는 서술만 쓰지 않는다.
+- Player가 실제로 한 말의 내용을 한국어 큰따옴표 “...” 안에 넣는다.
+- Player의 직접 발화를 Chapter 전체에 최소 1회 포함한다.
+- 올바른 예:
+  내가 기록표를 다시 보며 말했다. “그럼 먼저 두 압력값이 왜 다른지 비교해보자.”
+- 잘못된 예:
+  내가 기록표를 보며 대답했다.
+  그 다음 바로 {guide}가 말했다. “좋아.”
+- 정답, 직접 원인, 문제 발생 단계를 Story에서 새로 선공개하지 않는다.
+- JSON schema와 기존 필드 의미를 그대로 유지한다.
+""".strip()
+
+
 def generate_story_chapter(
     *,
     topic: str,
@@ -819,12 +1031,28 @@ def generate_story_chapter(
 - story_summary/latest_event/confirmed_facts_add도 Story 본문보다 앞서 더 강한 원인/결론을 확정하지 않는다. 아직 Question에서 판단해야 할 내용은 중립적 관찰이나 open_threads_add로 남긴다.
 """
 
+    companion_voice_rules = build_companion_voice_rules(
+        theme=theme,
+        guide_name=guide_name,
+        scope="story",
+    )
+    story_dialogue_rules = build_story_dialogue_distribution_rules(
+        theme=theme,
+        guide_name=guide_name,
+    )
+
     prompt = f"""너는 개인화 학습 Story의 단일 Chapter Writer다. 지금 필요한 Chapter {chapter_number} 하나만 작성한다.
 학습: {topic} / {goal} / {learner_level}
 Theme:
 {get_theme_prompt_rules(theme)}
 고양이:
 {_guide_rules(guide_name)}
+
+[DAY6 Character Voice - 기존 고양이 규칙보다 구체적인 우선 규칙]
+{companion_voice_rules}
+
+[DAY6 Story Dialogue Distribution]
+{story_dialogue_rules}
 Blueprint:
 {json.dumps(blueprint, ensure_ascii=False)}
 현재 Story State(이미 완료한 Chapter까지만 반영):
@@ -856,36 +1084,35 @@ Blueprint:
 - 전체 마지막 Chapter 여부: {is_final_chapter}
 JSON만 반환한다."""
 
-    result = generate_json(
-        feature="story_chapter",
-        prompt_version=CHAPTER_PROMPT_VERSION,
-        prompt=prompt,
-        schema=CHAPTER_SCHEMA,
-        model=DEFAULT_MODEL,
-        user_id=user_id,
-        world_id=world_id,
-        story_arc_id=story_arc_id,
-        mock_context={
-            "topic": topic,
-            "goal": goal,
-            "learner_level": learner_level,
-            "theme": theme,
-            "guide_name": guide_name,
-            "chapter_number": chapter_number,
-            "chapter_outline": writer_chapter_outline,
-            "target_concepts": concepts,
-            "block_end_chapter": block_end,
-            "target_chapter_count": target_chapter_count,
-            "opening_choice": (opening_choice or {}).get("choice_text"),
-        },
-    )
-    return _normalize_chapter(
-        result,
-        chapter_number=chapter_number,
-        target_concepts=concepts,
-        phase=phase,
-        block_end=block_end,
-        target_count=target_chapter_count,
+    last_dialogue_integrity_issues = []
+    for dialogue_integrity_attempt in range(2):
+        attempt_prompt = prompt
+        if dialogue_integrity_attempt:
+            attempt_prompt = (
+                prompt
+                + "\n\n"
+                + _story_dialogue_repair_prompt(
+                    last_dialogue_integrity_issues,
+                    guide_name=guide_name,
+                )
+            )
+        result = generate_json(feature='story_chapter', prompt_version=CHAPTER_PROMPT_VERSION, prompt=attempt_prompt, schema=CHAPTER_SCHEMA, model=DEFAULT_MODEL, user_id=user_id, world_id=world_id, story_arc_id=story_arc_id, mock_context={'topic': topic, 'goal': goal, 'learner_level': learner_level, 'theme': theme, 'guide_name': guide_name, 'chapter_number': chapter_number, 'chapter_outline': writer_chapter_outline, 'target_concepts': concepts, 'block_end_chapter': block_end, 'target_chapter_count': target_chapter_count, 'opening_choice': (opening_choice or {}).get('choice_text')})
+        normalized = _normalize_chapter(result, chapter_number=chapter_number, target_concepts=concepts, phase=phase, block_end=block_end, target_count=target_chapter_count)
+        dialogue_integrity_issues = (
+            _story_dialogue_integrity_issues(
+                normalized.get("story"),
+                guide_name=guide_name,
+            )
+        )
+        if not dialogue_integrity_issues:
+            return normalized
+        last_dialogue_integrity_issues = (
+            dialogue_integrity_issues
+        )
+
+    raise StoryDialogueIntegrityError(
+        "Story Dialogue Integrity 검사에 2회 연속 실패했습니다: "
+        + "; ".join(last_dialogue_integrity_issues)
     )
 
 
