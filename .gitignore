@@ -33,3 +33,10 @@ _migration_backups/
 migration_backups/
 audit_exports/
 qa_previews/
+# Local development archives
+scripts/dev/migrations/archive_*/
+scripts/dev/tools/archive_*/
+
+# Local generated audit / temporary artifacts
+artifacts/audits/
+artifacts/tmp/

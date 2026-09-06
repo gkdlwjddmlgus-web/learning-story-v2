@@ -5,9 +5,12 @@ import time
 
 import streamlit as st
 
+from components.dialogue_scene import render_dialogue_scene
 from repositories.world_repository import (
     update_guide_name_for_world_intro,
 )
+from services.dialogue_asset_service import resolve_portrait
+from services.story_background_service import resolve_story_background
 
 
 # DAY5_WORLD_INTRO_CINEMATIC_V1_2_FINAL_SCENE_SPACING
@@ -374,6 +377,20 @@ def _registered_eyebrow(
     return f"{base} · {safe_name}"
 
 
+def _intro_speaker_role(speaker: str) -> str:
+    return "companion" if str(speaker or "").strip() == "🐈" else "narrator"
+
+
+def _intro_speaker_name(
+    *,
+    speaker: str,
+    guide_name: str | None = None,
+) -> str:
+    if _intro_speaker_role(speaker) == "companion":
+        return str(guide_name or "고양이").strip() or "고양이"
+    return str(speaker or "기록").strip() or "기록"
+
+
 def _render_scene(
     *,
     theme: str,
@@ -381,20 +398,44 @@ def _render_scene(
     text: str,
     index: int,
     total: int,
+    world_id: int,
+    background_texts: list[str],
+    background_index: int,
+    guide_name: str | None = None,
     eyebrow: str | None = None,
 ) -> None:
     style = _THEME_STYLE[_safe_theme(theme)]
     resolved_eyebrow = eyebrow or str(style["eyebrow"])
-    st.markdown(
-        '<div class="world-intro-shell">'
-        '<div class="world-intro-scene">'
-        f'<div class="world-intro-eyebrow">{html.escape(resolved_eyebrow)}</div>'
-        f'<div class="world-intro-speaker">{html.escape(speaker)}</div>'
-        f'<div class="world-intro-line">{html.escape(text)}</div>'
-        f'<div class="world-intro-counter">{index:02d} / {total:02d}</div>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
+    role = _intro_speaker_role(speaker)
+
+    portrait_path = resolve_portrait(
+        theme,
+        role,
+        character_id="default",
+    )
+    background_path = resolve_story_background(
+        theme=theme,
+        beat_texts=background_texts,
+        current_index=background_index,
+        chapter_id=world_id,
+        chapter_title=_THEME_SCRIPT[theme]["encounter"][0][1],
+    )
+
+    render_dialogue_scene(
+        theme=theme,
+        speaker_type=role,
+        speaker_name=_intro_speaker_name(
+            speaker=speaker,
+            guide_name=guide_name,
+        ),
+        text=text,
+        portrait_path=portrait_path,
+        background_path=background_path,
+        context_label=(
+            f"{resolved_eyebrow} · {index:02d} / {total:02d}"
+        ),
+        show_next_button=False,
+        show_scene_chrome=True,
     )
 
 
@@ -430,12 +471,16 @@ def _render_pre_auto(*, user, world) -> None:
         frames=frames,
     )
     speaker, text = frames[index]
+    background_texts = [frame_text for _, frame_text in frames]
     _render_scene(
         theme=theme,
         speaker=speaker,
         text=text,
         index=index + 1,
         total=len(frames),
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=index,
     )
 
     if done:
@@ -460,12 +505,16 @@ def _render_pre_manual(*, user, world) -> None:
     index = max(0, min(index, len(frames) - 1))
     speaker, text = frames[index]
 
+    background_texts = [frame_text for _, frame_text in frames]
     _render_scene(
         theme=theme,
         speaker=speaker,
         text=text,
         index=index + 1,
         total=len(frames),
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=index,
     )
 
     label = "이름을 지어준다" if index == len(frames) - 1 else "다음"
@@ -494,6 +543,20 @@ def render_world_intro_naming(*, user, world) -> None:
         else:
             _render_pre_manual(user=user, world=world)
         return
+
+    frames = _THEME_SCRIPT[theme]["encounter"]
+    speaker, text = frames[-1]
+    background_texts = [frame_text for _, frame_text in frames]
+    _render_scene(
+        theme=theme,
+        speaker=speaker,
+        text=text,
+        index=len(frames),
+        total=len(frames),
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=len(frames) - 1,
+    )
 
     st.markdown(
         '<div class="world-intro-name-head">'
@@ -568,12 +631,22 @@ def _render_post_auto(*, user, world) -> None:
         frames=frames,
     )
     speaker, text = frames[index]
+    encounter_texts = [
+        frame_text
+        for _, frame_text in _THEME_SCRIPT[theme]["encounter"]
+    ]
+    reaction_texts = [frame_text for _, frame_text in frames]
+    background_texts = encounter_texts + reaction_texts
     _render_scene(
         theme=theme,
         speaker=speaker,
         text=text,
         index=index + 1,
         total=len(frames),
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=len(encounter_texts) + index,
+        guide_name=guide_name,
         eyebrow=_registered_eyebrow(
             theme=theme,
             guide_name=guide_name,
@@ -609,12 +682,22 @@ def _render_post_manual(*, user, world) -> None:
     index = max(0, min(index, len(frames) - 1))
     speaker, text = frames[index]
 
+    encounter_texts = [
+        frame_text
+        for _, frame_text in _THEME_SCRIPT[theme]["encounter"]
+    ]
+    reaction_texts = [frame_text for _, frame_text in frames]
+    background_texts = encounter_texts + reaction_texts
     _render_scene(
         theme=theme,
         speaker=speaker,
         text=text,
         index=index + 1,
         total=len(frames),
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=len(encounter_texts) + index,
+        guide_name=guide_name,
         eyebrow=_registered_eyebrow(
             theme=theme,
             guide_name=guide_name,
@@ -653,14 +736,30 @@ def render_world_intro_post(*, user, world) -> None:
         else str(st.session_state.get(_key(world_id, "saved_name"), "고양이"))
     )
     speaker, text = _THEME_SCRIPT[theme]["ready"]
-    st.markdown(
-        '<div class="world-intro-shell world-intro-shell--ready">'
-        '<div class="world-intro-ready">'
-        f'<div class="eyebrow">{html.escape(_registered_eyebrow(theme=theme, guide_name=guide_name))}</div>'
-        f'<div class="speaker">{html.escape(speaker)}</div>'
-        f'<div class="line">{html.escape(text.format(name=guide_name))}</div>'
-        '</div>',
-        unsafe_allow_html=True,
+    ready_text = text.format(name=guide_name)
+    encounter_texts = [
+        frame_text
+        for _, frame_text in _THEME_SCRIPT[theme]["encounter"]
+    ]
+    reaction_texts = [
+        frame_text.format(name=guide_name)
+        for _, frame_text in _THEME_SCRIPT[theme]["reaction"]
+    ]
+    background_texts = encounter_texts + reaction_texts + [ready_text]
+    _render_scene(
+        theme=theme,
+        speaker=speaker,
+        text=ready_text,
+        index=1,
+        total=1,
+        world_id=world_id,
+        background_texts=background_texts,
+        background_index=len(background_texts) - 1,
+        guide_name=guide_name,
+        eyebrow=_registered_eyebrow(
+            theme=theme,
+            guide_name=guide_name,
+        ),
     )
 
     if st.button(
@@ -673,7 +772,6 @@ def render_world_intro_post(*, user, world) -> None:
         st.session_state[_key(world_id, "complete")] = True
         st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="world-intro-final-bottom-space" aria-hidden="true"></div>',
         unsafe_allow_html=True,

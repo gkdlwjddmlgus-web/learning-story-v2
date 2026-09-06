@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# QUESTION_DIFFICULTY_COMPANION_VOICE_QUALITY_GATE_V1_20260906
+
 from typing import Any
 
 
@@ -62,7 +64,9 @@ LEARNER_LEVEL_PROFILES: dict[str, dict[str, str]] = {
             "evidence_summary는 핵심 상황만 짚고 상세 자료 판독을 요구한다."
         ),
         "question_rule": (
-            "비교·진단·원인 추론·적절한 조치를 묻는다. 단순 정의 문제를 최소화한다."
+            "비교·진단·원인 추론·적절한 조치를 묻는다. 단순 정의 문제를 최소화한다. "
+            "한눈에 보이는 단일 단서만 찾게 하지 말고, 가능하면 서로 다른 근거/조건 2개 이상을 연결해 판단하게 한다. "
+            "오답도 실제로 선택할 법한 방법으로 구성해 입문/초급과 사고 깊이를 분명히 구분한다."
         ),
         "ui_mode": "direct",
     },
@@ -98,7 +102,10 @@ REASONING_PROFILES: dict[str, dict[str, str]] = {
     },
     "intermediate": {
         "label": "분석",
-        "rule": "원인·조치·흐름·관측 결과를 연결해 분석하게 한다.",
+        "rule": (
+            "원인·조치·흐름·관측 결과를 연결해 분석하게 한다. "
+            "가능하면 독립된 근거 2개 이상을 결합하고, 그럴듯한 대안 사이의 trade-off를 비교하게 한다."
+        ),
     },
     "advanced": {
         "label": "전공/실무 판단",

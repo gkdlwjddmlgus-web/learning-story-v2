@@ -25,11 +25,37 @@ class AIQuotaExhausted(RuntimeError):
 
 
 @st.cache_resource(show_spinner=False)
-def get_gemini_client():
+def get_gemini_client(
+    api_key_secret_name: str = "GEMINI_API_KEY",
+    api_key_secret_index: int | None = None,
+):
+    """secret reference별 Gemini client cache. 실제 key 값은 인자/로그에 노출하지 않는다."""
+    try:
+        raw_secret = st.secrets[api_key_secret_name]
+        if api_key_secret_index is None:
+            api_key = raw_secret
+        else:
+            api_key = raw_secret[int(api_key_secret_index)]
+    except Exception as exc:
+        reference = (
+            api_key_secret_name
+            if api_key_secret_index is None
+            else f"{api_key_secret_name}[{int(api_key_secret_index)}]"
+        )
+        raise RuntimeError(
+            "Gemini API key secret을 읽지 못했습니다: " + reference
+        ) from exc
+
+    api_key = str(api_key or "").strip()
+    if not api_key:
+        raise RuntimeError("Gemini API key secret이 비어 있습니다.")
+
     return genai.Client(
-        api_key=st.secrets["GEMINI_API_KEY"],
+        api_key=api_key,
         http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
     )
+
+
 
 
 def _status_code(exc: Exception) -> int | None:
@@ -183,13 +209,15 @@ def generate_live_json(
     thinking_level: str | None = None,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     retry_on_timeout: bool = True,
+    api_key_secret_name: str = "GEMINI_API_KEY",
+    api_key_secret_index: int | None = None,
+    key_slot: str = "primary",
 ) -> tuple[Any, dict[str, Any]]:
-    """Gemini JSON 호출 + 요청 단위 latency/retry metadata.
-
-    일반 호출은 기존 60초 timeout/최대 2회 retry를 유지한다.
-    feature가 필요하면 timeout, thinking level, retry 정책을 override할 수 있다.
-    """
-    client = get_gemini_client()
+    """Gemini JSON 호출 + 요청 단위 latency/retry/route metadata."""
+    client = get_gemini_client(
+        api_key_secret_name,
+        api_key_secret_index,
+    )
     started = time.perf_counter()
     retry_count = 0
     attempt_count = 0
@@ -205,7 +233,6 @@ def generate_live_json(
             kwargs: dict[str, Any] = {
                 "response_mime_type": "application/json",
                 "max_output_tokens": max_output_tokens,
-                # Client 전역 timeout보다 feature별 timeout을 우선 적용한다.
                 "http_options": types.HttpOptions(timeout=timeout_ms),
             }
 
@@ -230,7 +257,11 @@ def generate_live_json(
             response_chars = len(text)
 
             if text.startswith("```"):
-                text = text.replace("```json", "", 1).replace("```", "").strip()
+                text = (
+                    text.replace("```json", "", 1)
+                    .replace("```", "")
+                    .strip()
+                )
 
             result = json.loads(text)
 
@@ -238,12 +269,16 @@ def generate_live_json(
                 "retry_count": retry_count,
                 "attempt_count": attempt_count,
                 "retry_reasons": retry_reasons,
-                "latency_ms": int((time.perf_counter() - started) * 1000),
+                "latency_ms": int(
+                    (time.perf_counter() - started) * 1000
+                ),
                 "request_timeout_ms": timeout_ms,
                 "thinking_level": thinking_level,
                 "max_output_tokens": max_output_tokens,
                 "prompt_chars": prompt_chars,
                 "response_chars": response_chars,
+                "model": model,
+                "key_slot": key_slot,
             }
 
         except Exception as exc:
@@ -251,9 +286,7 @@ def generate_live_json(
 
             if _is_hard_quota(exc):
                 wrapped = AIQuotaExhausted(
-                    "Gemini의 일일 무료/하드 요청 할당량이 소진되었습니다. "
-                    "이 오류는 자동 재시도로 해결되지 않으므로 즉시 중단했습니다. "
-                    "할당량이 갱신된 뒤 다시 시도해주세요."
+                    "Gemini의 일일/하드 할당량이 소진된 것으로 보입니다."
                 )
                 _attach_error_meta(
                     wrapped,
@@ -266,21 +299,24 @@ def generate_live_json(
                     max_output_tokens=max_output_tokens,
                     prompt_chars=prompt_chars,
                 )
+                setattr(wrapped, "_ls_model", model)
+                setattr(wrapped, "_ls_key_slot", key_slot)
                 raise wrapped from exc
 
-            # 명시적인 JSON schema 호환 오류에만 schema-less fallback 1회를 허용.
             if use_schema and _schema_related(exc):
                 use_schema = False
                 retry_count += 1
-                retry_reasons.append(f"schema_fallback:{_retry_reason(exc)}")
+                retry_reasons.append(
+                    "schema_fallback:" + _retry_reason(exc)
+                )
                 continue
 
-            # 문제 생성처럼 긴 요청은 timeout 후 같은 긴 요청을 자동 반복하지 않을 수 있다.
             if _is_timeout(exc) and not retry_on_timeout:
                 break
 
             retryable = _is_transient(exc) or isinstance(
-                exc, (ValueError, json.JSONDecodeError)
+                exc,
+                (ValueError, json.JSONDecodeError),
             )
             if not retryable or attempt >= max_retries:
                 break
@@ -302,6 +338,12 @@ def generate_live_json(
             max_output_tokens=max_output_tokens,
             prompt_chars=prompt_chars,
         )
+        setattr(last_error, "_ls_model", model)
+        setattr(last_error, "_ls_key_slot", key_slot)
         raise last_error
 
     raise RuntimeError("AI 생성 결과를 처리하지 못했습니다.")
+
+# AI_ROUTING_V1_FOUNDATION_20260904
+
+# AI_ROUTING_V1_LIST_KEYS_MODELS_20260904

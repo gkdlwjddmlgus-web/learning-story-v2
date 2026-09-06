@@ -152,6 +152,35 @@ def _css(theme: str) -> str:
 
     return f"""
     <style>
+    @keyframes dialogueSceneFadeIn {{
+        from {{
+            opacity:0;
+        }}
+        to {{
+            opacity:1;
+        }}
+    }}
+
+    @keyframes dialogueSceneKenBurns {{
+        from {{
+            transform:scale(1.00);
+        }}
+        to {{
+            transform:scale(1.025);
+        }}
+    }}
+
+    @keyframes dialoguePortraitEnter {{
+        from {{
+            opacity:0;
+            transform:translateY(8px) scale(.985);
+        }}
+        to {{
+            opacity:1;
+            transform:translateY(0) scale(1);
+        }}
+    }}
+
     .dialogue-scene-stage {{
         --dlg-accent:{style["accent"]};
         --dlg-text:{style["text"]};
@@ -163,6 +192,7 @@ def _css(theme: str) -> str:
         --dlg-speaker-font:{style["speaker_font"]};
 
         position:relative;
+        isolation:isolate;
         width:min(100%, 1120px);
         min-height:clamp(500px,65vh,690px);
         margin:.5rem auto 0;
@@ -172,71 +202,131 @@ def _css(theme: str) -> str:
         background:{style["stage_bg"]};
         background-size:34px 34px,34px 34px,auto,auto,auto;
         box-shadow:0 28px 80px rgba(0,0,0,.14);
+        animation:dialogueSceneFadeIn .42s ease-out both;
+    }}
+
+    .dialogue-scene-background {{
+        position:absolute;
+        z-index:0;
+        inset:-1.5%;
+        background-size:cover;
+        background-position:center;
+        background-repeat:no-repeat;
+        transform-origin:center center;
+        animation:dialogueSceneKenBurns 14s ease-out both;
+        will-change:transform;
+    }}
+
+    .dialogue-scene-stage::before {{
+        content:"";
+        position:absolute;
+        z-index:1;
+        inset:0;
+        pointer-events:none;
+        background:
+            linear-gradient(
+                to bottom,
+                rgba(10,8,6,.30) 0%,
+                rgba(10,8,6,.10) 18%,
+                rgba(10,8,6,0) 42%,
+                rgba(10,8,6,.02) 56%,
+                rgba(10,8,6,.18) 100%
+            );
     }}
 
     .dialogue-scene-stage::after {{
         content:"";
         position:absolute;
-        inset:0;
+        z-index:1;
+        inset:auto 0 0 0;
+        height:42%;
         pointer-events:none;
         background:
-            linear-gradient(to bottom, transparent 0%, transparent 50%, rgba(0,0,0,.04) 72%, rgba(0,0,0,.12) 100%);
+            linear-gradient(
+                to top,
+                rgba(0,0,0,.18) 0%,
+                rgba(0,0,0,.07) 42%,
+                transparent 100%
+            );
+    }}
+
+    .dialogue-scene-kicker,
+    .dialogue-scene-context {{
+        position:absolute;
+        z-index:4;
+        top:clamp(.95rem,2.1vw,1.55rem);
+        padding:.34rem .56rem;
+        border:1px solid rgba(255,255,255,.12);
+        border-radius:999px;
+        background:rgba(16,14,12,.42);
+        backdrop-filter:blur(7px);
+        -webkit-backdrop-filter:blur(7px);
+        box-shadow:0 6px 18px rgba(0,0,0,.14);
+        text-shadow:0 1px 3px rgba(0,0,0,.65);
     }}
 
     .dialogue-scene-kicker {{
-        position:absolute;
-        z-index:2;
-        top:clamp(1.15rem,2.5vw,2rem);
-        left:clamp(1.25rem,3vw,2.7rem);
-        color:var(--dlg-accent);
+        left:clamp(1rem,2.4vw,2rem);
+        color:#fff7ed;
         font-family:var(--dlg-speaker-font);
         font-size:.72rem;
         font-weight:800;
-        letter-spacing:.19em;
+        letter-spacing:.16em;
         text-transform:uppercase;
-        opacity:.95;
+    }}
+
+    .dialogue-scene-kicker::before {{
+        content:"";
+        display:inline-block;
+        width:.42rem;
+        height:.42rem;
+        margin-right:.42rem;
+        border-radius:999px;
+        background:var(--dlg-accent);
+        box-shadow:0 0 12px color-mix(in srgb, var(--dlg-accent) 75%, transparent);
+        vertical-align:.02rem;
     }}
 
     .dialogue-scene-context {{
-        position:absolute;
-        z-index:2;
-        top:clamp(1.15rem,2.5vw,2rem);
-        right:clamp(1.25rem,3vw,2.7rem);
-        max-width:50%;
-        color:var(--dlg-muted);
+        right:clamp(1rem,2.4vw,2rem);
+        max-width:54%;
+        color:#fffaf3;
         font-size:.72rem;
-        line-height:1.45;
+        line-height:1.4;
         text-align:right;
-        opacity:.82;
+        opacity:.96;
     }}
 
     .dialogue-box {{
         position:absolute;
-        z-index:3;
-        left:clamp(.9rem,2.7vw,2rem);
-        right:clamp(.9rem,2.7vw,2rem);
-        bottom:clamp(.75rem,2vw,1.35rem);
-        min-height:190px;
+        z-index:5;
+        left:clamp(.85rem,2.15vw,1.55rem);
+        right:clamp(.85rem,2.15vw,1.55rem);
+        bottom:clamp(.7rem,1.8vw,1.15rem);
+        min-height:172px;
         box-sizing:border-box;
         display:grid;
-        grid-template-columns:minmax(150px,22%) 1fr;
-        gap:clamp(1rem,2.4vw,2rem);
+        grid-template-columns:minmax(145px,21%) 1fr;
+        gap:clamp(.85rem,2vw,1.55rem);
         align-items:stretch;
-        padding:clamp(1rem,2.4vw,1.55rem);
+        padding:clamp(.9rem,2vw,1.3rem);
         border:1px solid var(--dlg-border);
-        border-radius:20px;
+        border-radius:19px;
         background:var(--dlg-box);
-        backdrop-filter:blur(14px);
-        box-shadow:0 18px 50px rgba(0,0,0,.16);
+        backdrop-filter:blur(12px) saturate(1.02);
+        -webkit-backdrop-filter:blur(12px) saturate(1.02);
+        box-shadow:
+            0 18px 46px rgba(0,0,0,.18),
+            inset 0 1px 0 rgba(255,255,255,.06);
     }}
 
     .dialogue-box.dialogue-narrator {{
         grid-template-columns:1fr;
-        min-height:165px;
+        min-height:148px;
     }}
 
     .dialogue-box.dialogue-player {{
-        grid-template-columns:1fr minmax(150px,22%);
+        grid-template-columns:1fr minmax(145px,21%);
     }}
 
     .dialogue-box.dialogue-player .dialogue-copy {{
@@ -251,18 +341,20 @@ def _css(theme: str) -> str:
 
     .dialogue-portrait {{
         position:relative;
-        min-height:155px;
+        min-height:148px;
         overflow:hidden;
-        border-radius:16px;
+        border-radius:15px;
         border:1px solid var(--dlg-border);
         background:var(--dlg-portrait);
+        box-shadow:0 10px 26px rgba(0,0,0,.14);
+        animation:dialoguePortraitEnter .46s cubic-bezier(.2,.8,.2,1) both;
     }}
 
     .dialogue-portrait img {{
         width:100%;
         height:100%;
-        min-height:155px;
-        max-height:205px;
+        min-height:148px;
+        max-height:195px;
         object-fit:cover;
         object-position:center 28%;
         display:block;
@@ -270,12 +362,12 @@ def _css(theme: str) -> str:
 
     .dialogue-portrait-fallback {{
         height:100%;
-        min-height:155px;
+        min-height:148px;
         display:flex;
         align-items:center;
         justify-content:center;
         color:var(--dlg-text);
-        font-size:clamp(3.4rem,7vw,5.2rem);
+        font-size:clamp(3.2rem,6.7vw,5rem);
         background:var(--dlg-portrait);
         opacity:.96;
     }}
@@ -285,31 +377,31 @@ def _css(theme: str) -> str:
         display:flex;
         flex-direction:column;
         justify-content:center;
-        padding:.15rem .25rem;
+        padding:.08rem .15rem;
     }}
 
     .dialogue-speaker {{
         color:var(--dlg-accent);
         font-family:var(--dlg-speaker-font);
-        font-size:clamp(.84rem,1.25vw,1rem);
+        font-size:clamp(.84rem,1.2vw,.98rem);
         font-weight:800;
         letter-spacing:.08em;
-        margin-bottom:.65rem;
+        margin-bottom:.55rem;
     }}
 
     .dialogue-text {{
         color:var(--dlg-text);
         font-family:var(--dlg-font);
-        font-size:clamp(1.38rem,2.15vw,1.92rem);
-        line-height:1.62;
+        font-size:clamp(1.32rem,2vw,1.78rem);
+        line-height:1.58;
         font-weight:500;
         word-break:keep-all;
         text-wrap:pretty;
     }}
 
     .dialogue-narrator .dialogue-text {{
-        font-size:clamp(1.42rem,2.1vw,1.88rem);
-        line-height:1.68;
+        font-size:clamp(1.34rem,1.95vw,1.76rem);
+        line-height:1.62;
     }}
 
     @media (max-width:768px) {{
@@ -322,11 +414,18 @@ def _css(theme: str) -> str:
             display:none;
         }}
 
+        .dialogue-scene-kicker {{
+            top:.82rem;
+            left:.82rem;
+            font-size:.68rem;
+            padding:.3rem .48rem;
+        }}
+
         .dialogue-box {{
             grid-template-columns:1fr;
-            gap:.8rem;
-            min-height:300px;
-            padding:1rem;
+            gap:.72rem;
+            min-height:285px;
+            padding:.92rem;
             border-radius:17px;
         }}
 
@@ -350,22 +449,22 @@ def _css(theme: str) -> str:
 
         .dialogue-copy {{
             justify-content:flex-start;
-            padding:.1rem .1rem .25rem;
+            padding:.08rem .08rem .2rem;
         }}
 
         .dialogue-speaker {{
-            margin-bottom:.45rem;
-            font-size:.82rem;
+            margin-bottom:.42rem;
+            font-size:.80rem;
         }}
 
         .dialogue-text,
         .dialogue-narrator .dialogue-text {{
-            font-size:clamp(1.20rem,5.2vw,1.48rem);
-            line-height:1.60;
+            font-size:clamp(1.16rem,5vw,1.42rem);
+            line-height:1.56;
         }}
 
         .dialogue-box.dialogue-narrator {{
-            min-height:220px;
+            min-height:210px;
         }}
 
         .dialogue-box.dialogue-player {{
@@ -386,8 +485,18 @@ def _css(theme: str) -> str:
             margin-left:auto;
         }}
     }}
+
+    @media (prefers-reduced-motion: reduce) {{
+        .dialogue-scene-stage,
+        .dialogue-scene-background,
+        .dialogue-portrait {{
+            animation:none !important;
+            transform:none !important;
+        }}
+    }}
     </style>
     """
+
 
 
 def render_dialogue_scene(
@@ -417,16 +526,15 @@ def render_dialogue_scene(
     portrait_uri = _data_uri(portrait_path)
     background_uri = _data_uri(background_path)
 
-    if background_uri:
-        custom_background = (
-            f"background-image:"
-            f"linear-gradient(to bottom,rgba(0,0,0,.02),rgba(0,0,0,.16)),"
-            f"url('{background_uri}');"
-            f"background-size:cover;"
-            f"background-position:center;"
+    background_html = (
+        (
+            '<div class="dialogue-scene-background" '
+            f'style="background-image:url(&quot;{background_uri}&quot;);">'
+            '</div>'
         )
-    else:
-        custom_background = ""
+        if background_uri
+        else ""
+    )
 
     narrator = normalized_role == "narrator"
 
@@ -476,7 +584,8 @@ def render_dialogue_scene(
         generated_text_readability_css()
         + _css(normalized_theme)
         + (
-            f'<section class="dialogue-scene-stage" style="{custom_background}">'
+            '<section class="dialogue-scene-stage">'
+            f'{background_html}'
             f'{kicker_html}'
             f'{context_html}'
             f'<div class="{box_class}">'
@@ -509,3 +618,5 @@ def render_dialogue_scene(
             use_container_width=True,
         )
     )
+
+# CINEMATIC_STORY_SCENE_V2_20260906

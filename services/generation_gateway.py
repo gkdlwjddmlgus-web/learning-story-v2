@@ -4,7 +4,8 @@ import time
 from typing import Any
 
 from repositories.generation_repository import log_ai_generation
-from services.ai_client import DEFAULT_MODEL, generate_live_json
+from services.ai_client import DEFAULT_MODEL
+from services.ai_routing_service import generate_routed_json
 from services.dev_config import get_mock_delay, is_ai_mock_enabled
 from services.mock_generation import generate_mock
 
@@ -112,11 +113,14 @@ def generate_json(
     started = time.perf_counter()
 
     try:
-        result, meta = generate_live_json(**live_kwargs)
+        result, meta = generate_routed_json(
+            feature=feature,
+            **live_kwargs,
+        )
 
         _log_best_effort(
             feature=feature,
-            model=model,
+            model=meta.get("model", model),
             prompt_version=prompt_version,
             latency_ms=meta.get("latency_ms"),
             success=True,
@@ -133,14 +137,20 @@ def generate_json(
             max_output_tokens=meta.get("max_output_tokens"),
             prompt_chars=meta.get("prompt_chars"),
             response_chars=meta.get("response_chars"),
-            retry_reasons=meta.get("retry_reasons", []),
+            retry_reasons=(
+                meta.get("retry_reasons", [])
+                + [
+                    "route:" + str(item)
+                    for item in meta.get("route_history", [])
+                ]
+            ),
         )
         return result
 
     except Exception as exc:
         _log_best_effort(
             feature=feature,
-            model=model,
+            model=getattr(exc, "_ls_model", model),
             prompt_version=prompt_version,
             latency_ms=getattr(
                 exc,
@@ -163,6 +173,16 @@ def generate_json(
             ),
             prompt_chars=getattr(exc, "_ls_prompt_chars", len(prompt)),
             response_chars=None,
-            retry_reasons=getattr(exc, "_ls_retry_reasons", []),
+            retry_reasons=(
+                getattr(exc, "_ls_retry_reasons", [])
+                + [
+                    "route:" + str(item)
+                    for item in getattr(
+                        exc, "_ls_route_history", []
+                    )
+                ]
+            ),
         )
         raise
+
+# AI_ROUTING_V1_FOUNDATION_20260904

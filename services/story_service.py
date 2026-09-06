@@ -19,10 +19,17 @@ from services.character_voice_service import (
 )
 import re
 
+from services.theme_narrative_service import (
+    build_theme_narrative_planner_rules,
+    build_theme_narrative_writer_rules,
+)
+
 
 BLOCK_SIZE = 3
-OUTLINE_PROMPT_VERSION = "story_outline_v5_day3_personalization"
-CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v13_day6_dialogue_integrity_gate"
+OUTLINE_PROMPT_VERSION = "story_outline_v6_theme_narrative_architecture"
+CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v15_agency_continuity_gate"
+# STORY_AGENCY_CONTINUITY_GATE_V1_2_20260904
+# THEME_NARRATIVE_ARCHITECTURE_V1_20260904
 # DAY6_STORY_DIALOGUE_INTEGRITY_GATE_V1
 # DAY6_STORY_DIALOGUE_COHERENCE_V1
 # DAY6_CHARACTER_VOICE_STORY_DIALOGUE_PROMPT_V1
@@ -495,6 +502,10 @@ def generate_story_block_outline(
         global_profile=global_profile,
     )
 
+    theme_narrative_planner_rules = build_theme_narrative_planner_rules(
+        theme=theme,
+        recent_interaction_modes=recent_interaction_modes,
+    )
     prompt = f"""너는 Story Block Planner다. 긴 본문을 쓰지 말고 Chapter {start_chapter}~{end}의 방향만 짧은 JSON으로 설계한다.
 학습 주제: {topic}
 목표: {goal}
@@ -516,11 +527,14 @@ Blueprint:
 {personalization_rules}
 Chapter별 확정 Concept: {json.dumps(chapter_concept_plan, ensure_ascii=False)}
 {interaction_rules}
+
+[Theme Narrative Architecture v1]
+{theme_narrative_planner_rules}
 규칙:
 - 본문을 쓰지 않는다.
 - 각 Chapter는 title_seed/narrative_goal/learning_bridge/ending_hook/interaction_mode/interaction_goal을 계획한다.
 - 최근 Story Choice가 존재하고 이번 Block이 새로 시작된다면, 첫 Chapter의 narrative_goal은 반드시 그 선택 행동을 실제로 수행하는 장면에서 시작한다.
-- 선택한 방향을 단순 언급/복사하지 말고, 그 행동의 결과로 이번 Chapter의 새 증거·인물·시스템 이상 중 하나가 발견되게 한다.
+- 선택한 방향을 단순 언급/복사하지 말고, 그 행동의 결과로 Theme에 맞는 변화(새 인물/동료 반응/위험/새 장소/기회/경쟁/발견/단서 등) 중 하나가 발생하게 한다. 비미스터리 Theme에서는 '증거/이상'을 기본값으로 두지 않는다.
 - 새 학습 Concept 때문에 사용자의 선택을 무시하고 갑자기 다른 행동으로 점프하지 않는다. Concept는 선택을 따라가다가 발견되는 문제를 해석하는 도구로 연결한다.
 - Story는 독립적으로 재미있어야 하고 실제 Concept을 마법 이름으로 바꾸지 않는다.
 - 같은 Story 흐름을 이어가더라도 Chapter마다 사용자가 하는 행동/판단 방식은 변주한다.
@@ -626,7 +640,7 @@ def _build_reasoning_safe_writer_outlines(
     interaction_label = str(
         chapter_outline.get("interaction_label")
         or chapter_outline.get("interaction_mode")
-        or "조사"
+        or "상호작용"
     ).strip()
     observation_anchor = str(chapter_outline.get("narrative_goal") or "").strip()
     if not observation_anchor:
@@ -650,30 +664,34 @@ def _build_reasoning_safe_writer_outlines(
             "'X 과정에서 사라졌다'처럼 특정 중간 구간을 발생 위치로 고정하지 않는다. '두 endpoint 사이 어디선가 차이가 생겼다' 수준으로 유지한다."
         ),
         "stage_neutral_rule": (
-            "Question이 문제 발생 단계를 판단하기 전에는 Story와 state_update 모두 endpoint 간 차이만 기록한다. "
-            "open_threads_add도 '두 endpoint 사이의 불일치가 어느 처리 지점에서 왜 발생했는가?'처럼 중립적으로 남기고, "
-            "아직 확인하지 않은 특정 단계·스크립트·구간을 이미 누락이 발생한 위치로 전제하지 않는다."
+            "이번 Question이 처리 단계·발생 위치를 판단하는 유형일 때만 이 규칙을 적용한다. 그 경우 Story와 state_update는 "
+            "endpoint 간 확인된 차이까지만 기록하고, 아직 확인하지 않은 특정 단계·스크립트·구간을 원인 위치로 전제하지 않는다. "
+            "단계 판단 유형이 아니라면 이 규칙을 이유로 새로운 불일치·로그·처리 단계를 만들어내지 않는다."
         ),
         "narrative_goal": (
-            "직전 Choice와 현재 Story State를 이어 받아, 이번 Chapter에서 관찰할 수 있는 "
-            "이상 현상과 조사 필요성을 드러낸다. 어느 처리 단계가 문제인지, 직접 원인이 "
-            "무엇인지, 가설이 맞는지는 아직 확정하지 않는다."
+            "직전 Choice와 현재 Story State를 이어 받아, 이번 Theme에 맞는 목표를 실제 장면으로 전개한다. "
+            "만남·여정·위기·경쟁·발견·관계 변화·조사 중 맥락에 맞는 흐름을 사용할 수 있으며 "
+            "비미스터리 Theme에서 조사/이상 현상을 기본값으로 두지 않는다. "
+            "다만 이후 Question에서 학습자가 판단해야 할 직접 원인·정답·가설 결과는 아직 확정하지 않는다."
         ),
         "learning_bridge": (
-            f"{concept_text}을(를) Story의 관찰 자료를 해석하는 도구로 연결한다. "
-            "정의·정답·원인·조치 결론을 먼저 설명하지 않고 이후 Evidence/Question에서 적용하게 한다."
+            f"{concept_text}을(를) Story 속 행동·선택·비교·탐사·생존·관계·발견·추론 중 "
+            "이번 Theme에 맞는 경험을 이해하거나 수행하는 도구로 연결한다. "
+            "정의·정답·직접 원인·조치 결론을 먼저 확정하지 않고 이후 Evidence/Question에서 적용하게 한다."
         ),
         "ending_hook": (
-            "서로 맞지 않는 기록이나 결과 차이를 확인한 뒤, 어디서 왜 어긋났는지 "
-            "다음 Evidence/Question에서 판단하도록 로그·기록·조건을 조사하는 행동으로 끝낸다."
+            "다음 행동·선택·만남·위험·발견·경쟁·관계 변화·추론 중 Theme에 맞는 후속 긴장을 남긴다. "
+            "반드시 로그/기록 조사나 불일치 추적으로 끝내지 않는다. "
+            "학습 판단이 필요한 경우 그 결론만 Evidence/Question 이후로 남긴다."
         ),
         "interaction_goal": (
-            f"{interaction_label} 방식으로 관찰 가능한 사실과 불일치를 제시하되, "
-            "문제 발생 단계·직접 원인·가설 결론은 학습자의 판단 영역으로 남긴다."
+            f"{interaction_label}은(는) 이번 Chapter의 미시 학습 상호작용이다. "
+            "거시 Story 장르 전체를 조사극으로 바꾸지 않는다. "
+            "필요한 관찰·사례·조건은 제시하되 직접 원인·정답·가설 결론은 학습자의 판단 영역으로 남긴다."
         ),
         "interaction_question_style": (
-            "Story는 판단에 필요한 맥락만 열어 둔다. 구체 Evidence를 읽은 뒤 단계·원인·가설 결과를 "
-            "학습자가 Question에서 판단한다."
+            "Story는 판단에 필요한 맥락만 열어 둔다. 구체 Evidence를 읽은 뒤 이번 Question이 요구하는 "
+            "비교·적용·판단·추론을 학습자가 수행한다. Story가 직접 정답이나 핵심 결론을 대신 확정하지 않는다."
         ),
     }
 
@@ -707,15 +725,18 @@ def _build_reasoning_safe_writer_outlines(
         "block_title": block_outline.get("block_title"),
         "block_goal": (
             "기존 Block의 진행 방향과 Chapter 순서는 유지한다. 다만 현재 Chapter에서 이후 Question이 "
-            "판단할 단계·원인·가설 결과를 Story 내부 결론으로 선공개하지 않는다."
+            "판단할 핵심 정답·직접 원인·가설 결과·조치 결론을 Story 내부 결론으로 선공개하지 않는다. "
+            "이 안전 규칙 때문에 Block 전체를 조사/불일치 서사로 바꾸지 않는다."
         ),
         "chapters": safe_chapters,
         "block_resolution": (
-            "기존 Block의 계획된 진행을 유지하되, 현재 Chapter의 학습 판단은 Evidence/Question 이후에 "
-            "확정한다. Story는 다음 조사 행동과 열린 질문을 남긴다."
+            "기존 Block의 계획된 진행과 Theme별 Narrative 흐름을 유지하되, 현재 Chapter의 학습 판단은 "
+            "Evidence/Question 이후에 확정한다. Story는 Theme에 맞는 다음 행동·선택·만남·위험·발견·"
+            "경쟁·관계 변화 또는 열린 질문 중 자연스러운 후속 동력을 남긴다."
         ),
     }
     return safe_block, safe_chapter
+
 
 class StoryDialogueIntegrityError(ValueError):
     """Story의 Player/Companion turn-taking가 깨진 경우 발생한다."""
@@ -826,60 +847,66 @@ def _story_dialogue_integrity_issues(
     guide_name: str | None = None,
 ) -> list[str]:
     """
-    Hard fail:
-    1) Player 발화 attribution이 있는데 실제 대사가 없다.
-    2) Chapter 전체에 Player의 실제 직접 발화 turn이 없다.
+    Player Agency hard fail.
+
+    허용:
+    - Narrator 서술
+    - Companion/NPC 행동과 직접 대사
+    - 사용자가 이미 고른 Story Choice 때문에 세계/NPC/상황이 변한 결과
+
+    금지:
+    - AI가 Player의 직접 대사를 작성
+    - AI가 Player의 생각/감정/새 의사결정을 작성
+    - AI가 Player의 의도적 행동을 1인칭 주어로 새로 작성
+
+    Story Choice 자체의 결과는 Prompt에서 이어가되,
+    Player의 새 행동/대사로 확장하지 않는다.
     """
-    sentences = _story_dialogue_sentences(
-        story_text
-    )
+    sentences = _story_dialogue_sentences(story_text)
     issues: list[str] = []
-    player_direct_turns = 0
 
-    for index, sentence in enumerate(
-        sentences
-    ):
-        if not _is_player_speech_attribution(
-            sentence
-        ):
+    agency_verb_pattern = re.compile(
+        r"(?:"
+        r"말했|말하|대답|답했|물었|묻|외쳤|중얼|속삭|덧붙였|되물었|"
+        r"생각했|생각하|느꼈|결심|결정|선택|원했|바랐|"
+        r"확인했|확인하|살폈|살펴|조사했|조사하|비교했|비교하|"
+        r"펼쳤|펼치|열었|열어|들었|들어|잡았|잡아|건넸|건네|"
+        r"다가갔|다가가|따라갔|따라가|도왔|도와|공격|피했|피하|"
+        r"사용했|사용하|시도했|시도하|기록했|기록하"
+        r")"
+    )
+    player_pronoun_pattern = re.compile(
+        r"(?:^|[\s,.!?])(?:나는|내가|우리는|우리가)(?:[\s,.!?]|$)"
+    )
+
+    for sentence in sentences:
+        text = str(sentence or "").strip()
+        if not text:
             continue
 
-        if _has_direct_quote_after_player_attribution(
-            sentence
-        ):
-            player_direct_turns += 1
+        # 명시적인 Player 발화 attribution은 대사 유무와 관계없이 금지한다.
+        if _is_player_speech_attribution(text):
+            preview = text if len(text) <= 110 else text[:107] + "..."
+            issues.append(
+                "ungrounded_player_speech_or_attribution: " + preview
+            )
             continue
 
-        next_sentence = (
-            sentences[index + 1]
-            if index + 1 < len(sentences)
-            else ""
-        )
+        # Companion/NPC quote 내부의 '나는'은 Player로 오인하지 않도록
+        # 직접 대사 구간을 제거한 Narrator 부분만 검사한다.
+        narration_only = _DIALOGUE_DIRECT_QUOTE_PATTERN.sub("", text)
 
         if (
-            next_sentence
-            and _starts_with_direct_quote(
-                next_sentence
-            )
+            player_pronoun_pattern.search(narration_only)
+            and agency_verb_pattern.search(narration_only)
         ):
-            player_direct_turns += 1
-            continue
-
-        preview = sentence
-        if len(preview) > 90:
-            preview = preview[:87] + "..."
-
-        issues.append(
-            "player_attribution_without_direct_quote: "
-            + preview
-        )
-
-    if player_direct_turns < 1:
-        issues.append(
-            "player_direct_dialogue_missing"
-        )
+            preview = text if len(text) <= 110 else text[:107] + "..."
+            issues.append(
+                "ungrounded_player_action_or_intent: " + preview
+            )
 
     return issues
+
 
 
 def _story_dialogue_repair_prompt(
@@ -887,37 +914,32 @@ def _story_dialogue_repair_prompt(
     *,
     guide_name: str | None,
 ) -> str:
-    guide = str(
-        guide_name or "동료 고양이"
-    ).strip()
-
-    issue_text = "\n".join(
-        f"- {issue}"
-        for issue in issues
-    )
+    guide = str(guide_name or "동료 고양이").strip()
+    issue_text = "\n".join(f"- {issue}" for issue in issues)
 
     return f"""
-[DAY6 Dialogue Integrity Repair Retry]
-직전 Story 생성물은 Dialogue Integrity 검사에 실패했다.
-아래 문제만 고치되 기존 Chapter의 사건, 관찰 사실, 학습 경계,
-target Concept, Story State update 의미는 바꾸지 않는다.
+[Story Agency Integrity Repair Retry]
+직전 Story 생성물은 Player Agency 검사에 실패했다.
+아래 문제만 고치되 기존 Chapter의 사건, 관찰 사실, Theme Narrative,
+target Concept, Reasoning Boundary, Story State update 의미는 바꾸지 않는다.
 
 검출된 문제:
 {issue_text}
 
 반드시 지킬 것:
-- '{guide}'의 질문/발화 뒤 Player가 반응하는 turn을 만들었다면
-  '내가 대답했다/말했다/물었다'라는 서술만 쓰지 않는다.
-- Player가 실제로 한 말의 내용을 한국어 큰따옴표 “...” 안에 넣는다.
-- Player의 직접 발화를 Chapter 전체에 최소 1회 포함한다.
-- 올바른 예:
-  내가 기록표를 다시 보며 말했다. “그럼 먼저 두 압력값이 왜 다른지 비교해보자.”
-- 잘못된 예:
-  내가 기록표를 보며 대답했다.
-  그 다음 바로 {guide}가 말했다. “좋아.”
-- 정답, 직접 원인, 문제 발생 단계를 Story에서 새로 선공개하지 않는다.
+- AI가 Player의 대사를 새로 쓰지 않는다.
+- '내가 말했다/물었다/대답했다' 뒤에 대사를 보충하는 방식으로 고치지 않는다.
+- '나는/내가/우리는/우리가'를 주어로 Player의 생각·감정·결정·의도적 행동을 새로 만들지 않는다.
+- Player 반응이 필요해 보이는 지점은 {guide}나 NPC의 반응, 환경 변화, 열린 질문, 다음 Story Choice로 바꾼다.
+- 직전 Story Choice가 있었다면 그 선택 자체는 이미 일어난 사실로 존중하되,
+  선택 문장을 Player 대사로 바꾸거나 선택하지 않은 추가 행동을 만들어내지 않는다.
+- 좋은 방향: '그 선택의 결과, 닫혀 있던 통로가 열리고 안쪽에서 낯선 빛이 새어 나왔다.'
+- 나쁜 방향: '내가 문을 열며 말했다. “안으로 들어가 보자.”'
+- 이전 Chapter를 요약해서 다시 설명하기보다, 이전 결과 때문에 지금 달라진 세계/NPC/상황에서 바로 시작한다.
+- 정답, 직접 원인, 문제 발생 단계는 Story에서 새로 선공개하지 않는다.
 - JSON schema와 기존 필드 의미를 그대로 유지한다.
 """.strip()
+
 
 
 def generate_story_chapter(
@@ -976,9 +998,9 @@ def generate_story_chapter(
         choice_bridge_section = f"""
 [직전 Story Choice - 이번 Chapter 첫 장면에 반드시 반영]
 사용자가 선택한 방향: {opening_choice.get('choice_text')}
-- 첫 1~2문장에서 사용자가 이 선택을 실제로 수행하고 있음을 행동/결과로 보여준다.
-- 선택을 수행한 결과 이번 Chapter의 핵심 증거·이상·인물 반응 중 하나가 발견되어야 한다.
-- 선택 문장을 그대로 복사해 '선택했다'고 설명만 하지 않는다.
+- 첫 1~2문장에서는 사용자의 선택 자체를 다시 연기시키지 말고, 그 선택 때문에 세계/NPC/상황에 생긴 결과부터 보여준다.
+- 선택을 수행한 결과 Theme에 맞는 변화(새 인물/동료 반응/위험/새 장소/기회/경쟁/발견/단서 등) 중 하나가 실제로 발생해야 한다. 비미스터리 Theme에서는 증거/이상 발견을 기본 결말로 강제하지 않는다.
+- 선택 문장을 그대로 복사하거나 Player 대사로 바꾸지 않는다. 선택하지 않은 추가 행동·감정·의도를 덧붙이지 않는다.
 - 선택과 무관한 새 학습 Concept로 갑자기 점프하지 않는다. 새 Concept는 선택의 결과로 발견된 문제를 해석하는 도구로 등장시킨다.
 """
 
@@ -1002,7 +1024,7 @@ def generate_story_chapter(
     continuity_section = f"""
 [직전 Chapter 진행 결과 - 다음 Chapter 연결]
 {previous_result or '명시적 직전 결과 없음'}
-- 직전 결과가 있다면 첫 문단 1~2문장 안에서 그 결과가 이번 행동/발견의 직접적인 이유가 되게 한다.
+- 직전 결과가 있다면 첫 문단 1~2문장 안에서 그 결과 때문에 현재 세계/NPC/관계/위험/기회 중 무엇이 달라졌는지 보여준다. 이전 사건을 요약해서 다시 설명하지 않는다.
 - 이미 해결한 사실을 다시 처음 발견하거나 미해결처럼 되풀이하지 않는다.
 - 후속 문제가 생긴다면 '앞 단계를 정리한 뒤 새로 드러난 문제'로 연결한다.
 - 현재 open_threads: {json.dumps(open_threads, ensure_ascii=False)}
@@ -1010,12 +1032,12 @@ def generate_story_chapter(
 
     reasoning_boundary_section = f"""
 [Story ↔ Question Reasoning 경계]
-- Story 본문은 사건의 상황, 관찰 가능한 이상, 조사 동기와 다음 조사 행동까지만 제공한다.
+- Story 본문은 Theme에 맞는 상황·만남·여정·위기·경쟁·발견·관계 변화·추론을 자유롭게 전개할 수 있다. Reasoning Boundary의 목적은 Story 장르를 조사극으로 고정하는 것이 아니라, 이후 Question의 핵심 판단을 대신 확정하지 않는 것이다.
 - 이후 Question에서 학습자가 판단해야 할 '문제 발생 단계', '직접 원인', '정답 Concept', '가설의 확정/기각', '복구/조치 결론'을 Story에서 먼저 확정하지 않는다.
-- opening_choice에 Concept 이름이 들어가더라도 그것은 이번 Chapter에서 검증할 가설/행동 방향으로 취급한다. 아직 확인하지 않은 가설을 Story에서 사실로 승격시키지 않는다.
-- 허용 예: 'ELT 방식이라는 가설을 확인하기 위해 원본과 처리 기록을 대조한다.'
-- 금지 예: Question에서 아직 판단해야 하는데 '이 시스템은 ELT다', '가공 과정에서 데이터가 빠졌다', '스크립트가 원인이다', '외부 도난이 아니다'처럼 진단을 먼저 확정한다.
-- 원본과 결과가 다르다는 관찰, 기록의 불일치, 이상 징후는 Story에 보여줄 수 있다. 다만 그 차이가 어느 단계에서 왜 발생했는지는 학습자가 Evidence와 Question을 통해 판단하게 남겨둔다.
+- opening_choice는 사용자가 실제로 고른 행동 방향으로 존중한다. Choice 안에 Concept/가설이 포함되어 있어도 그 행동의 결과나 아직 확인하지 않은 결론을 Story가 사실로 승격시키지 않는다.
+- 허용 예: 학습 Concept를 길 선택, 탐사, 수련, 위험 판단, 인물과의 협력, 자료 비교, 추론 등 현재 Theme 행동에 적용하되 결과를 먼저 확정하지 않는다.
+- 금지 예: Question에서 아직 판단해야 하는 정답·직접 원인·가설 결과·최종 조치를 Story가 먼저 선언해 사용자가 Evidence를 읽고 생각할 필요를 없애는 것.
+- 이번 학습이 비교/불일치/원인 진단을 요구하는 경우에는 관찰 가능한 차이만 Story에 보여주고 직접 원인·발생 위치는 Evidence/Question 판단으로 남긴다. 그런 유형이 아니라면 억지로 이상 징후나 불일치를 만들지 않는다.
 - [관찰 endpoint 고정] writer_chapter_outline.observation_anchor에 등장한 비교 대상·저장소·시점·처리 전후 위치를 Story의 관찰 기준으로 유지한다. 원인을 숨기기 위해 endpoint 자체를 다른 단계로 옮기지 않는다.
 - 예를 들어 계획이 '원본 저장소와 최종 결과를 비교'하는 구조라면, Story에서 임의로 '수집 기록과 가공 직전 로그 사이에서 이미 수량이 달랐다' 같은 새로운 중간 불일치를 만들지 않는다.
 - Story State, 직전 Chapter 결과, observation_anchor에 명시되지 않은 수량·시각·파일 상태·중간 checkpoint를 새 사실처럼 생성하지 않는다. 구체 값이 필요하면 정성적 불일치만 보여주고 실제 수치/조건은 Evidence/Question에 남긴다.
@@ -1024,8 +1046,8 @@ def generate_story_chapter(
 - 단계가 아직 미확정이면 '원본 endpoint에는 존재하지만 최종 endpoint에서는 확인되지 않는다', '두 결과 사이에 불일치가 있다', '어느 처리 지점에서 차이가 생겼는지 확인해야 한다'처럼 endpoint 차이와 열린 질문만 서술한다.
 - state_update의 confirmed_facts_add/story_summary/latest_event도 같은 endpoint만 기록한다. 관찰 위치를 바꾸거나 아직 보지 않은 중간 단계의 사실을 새로 확정하지 않는다.
 - open_threads_add는 미확정 단계명을 원인 구간으로 전제하지 않는다. '가공 스크립트를 거치는 동안 왜 누락됐는가?'보다 '원본과 최종 결과 사이의 불일치가 어느 처리 지점에서 왜 발생했는가?'처럼 단계 중립 질문을 남긴다.
-- Story 끝은 '어디서/왜 어긋났는지 확인해야 한다'는 open question 또는 다음 조사 행동으로 이어지게 한다. 미스터리의 긴장과 학습자의 판단 여지를 동시에 남긴다.
-- Concept는 Story를 해석하는 도구로 자연스럽게 등장시키되, 정의를 강의하거나 정답 문장으로 사용하지 않는다.
+- Story 끝은 다음 행동·선택·만남·위험·발견·경쟁·관계 변화·추론 중 Theme에 맞는 동력으로 이어질 수 있다. 미스터리가 아닌 Theme에서 open question/조사를 기본 결말로 강제하지 않는다.
+- Concept는 Story를 해석하는 것뿐 아니라 행동·선택·탐사·생존·수련·협력·비교·추론을 가능하게 하는 도구로 자연스럽게 등장시키되, 정의를 강의하거나 정답 문장으로 사용하지 않는다.
 - 현재 Story State의 confirmed_facts/resolved_events에 이미 확정된 사실은 숨기지 않는다. 이 규칙은 이번 Chapter에서 새로 판단해야 하는 정보만 미확정으로 남기기 위한 것이다.
 - Block/Chapter Outline에 원인이나 결론이 내부 계획으로 적혀 있더라도, 그것이 이후 Question의 판단 대상이면 Story 사용자 본문에 확정 사실로 복사하지 않는다. Reasoning 경계를 Outline 문구보다 우선한다.
 - story_summary/latest_event/confirmed_facts_add도 Story 본문보다 앞서 더 강한 원인/결론을 확정하지 않는다. 아직 Question에서 판단해야 할 내용은 중립적 관찰이나 open_threads_add로 남긴다.
@@ -1041,6 +1063,11 @@ def generate_story_chapter(
         guide_name=guide_name,
     )
 
+    theme_narrative_writer_rules = build_theme_narrative_writer_rules(
+        theme=theme,
+        chapter_outline=chapter_outline,
+        opening_choice=opening_choice,
+    )
     prompt = f"""너는 개인화 학습 Story의 단일 Chapter Writer다. 지금 필요한 Chapter {chapter_number} 하나만 작성한다.
 학습: {topic} / {goal} / {learner_level}
 Theme:
@@ -1063,12 +1090,30 @@ Blueprint:
 {json.dumps(writer_chapter_outline, ensure_ascii=False)}
 {interaction_section}
 {choice_bridge_section}
+
+[Player Agency & Continuity Gate v1.2]
+- Player는 AI가 조종하는 NPC가 아니다.
+- AI는 Player의 직접 대사, 생각, 감정, 새 의사결정, 의도적 행동을 임의로 작성하지 않는다.
+- '나는/내가/우리는/우리가 ...했다/말했다/생각했다/결정했다' 형태로 Player를 움직이지 않는다.
+- Companion/NPC는 자유롭게 말하고 행동할 수 있다.
+- Player의 선택이 필요한 순간은 Story Choice 또는 Question UI에 남긴다.
+- opening_choice가 있으면 그 Choice는 이미 사용자가 실제로 고른 방향이다. 그 선택 때문에 세계/NPC/상황에 생긴 결과만 이어간다.
+- opening_choice를 Player 대사로 재작성하지 않고, 선택하지 않은 추가 행동·감정·의도를 덧붙이지 않는다.
+- 이전 Chapter 연결은 '지난 사건은 해결됐다' 같은 요약문을 반복하는 방식보다, 이전 결과가 바꾼 현재 상태에서 바로 시작한다.
+- 이전 결과 → 현재의 변화/기회/관계/위험/목적이 인과적으로 이어져야 한다.
+- 매 Chapter를 '앞 문제 해결 → 새로운 이상 발견' 공식으로 연결하지 않는다. Theme Narrative Director가 정한 만남·여정·위험·경쟁·발견·관계 변화 등을 우선한다.
+
+
 {continuity_section}
 {reasoning_boundary_section}
 최근 학습: {json.dumps(recent_profile or {}, ensure_ascii=False)}
 장기 학습: {json.dumps(global_profile or {}, ensure_ascii=False)}
 {personalization_rules}
 {theme_writer_rules}
+
+[Theme Narrative Architecture v1]
+{theme_narrative_writer_rules}
+
 {pedagogy_rules}
 규칙:
 - 한국어 250~450자, 짧은 3문단. 입문/초급은 짧은 문장과 쉬운 연결어를 우선한다.

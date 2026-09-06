@@ -784,12 +784,17 @@ def _render_manual_cinematic(
 
 
 def render_story_review(*, story_text: str) -> None:
-    st.markdown(
-        generated_text_readability_css(),
-        unsafe_allow_html=True,
-    )
     paragraphs = _split_story_paragraphs(story_text)
+
     with st.expander("📖 스토리 다시보기", expanded=False):
+        # Readability CSS는 expander 내부에서 주입한다.
+        # expander 앞에 별도 st.markdown element container가 생기면
+        # 같은 row의 오른쪽 expander보다 Story Review가 아래로 밀릴 수 있다.
+        st.markdown(
+            generated_text_readability_css(),
+            unsafe_allow_html=True,
+        )
+
         paragraphs_html = "".join(
             '<p class="story-paragraph">'
             f"{html.escape(item)}"
@@ -863,3 +868,5 @@ def render_story_experience(
         )
 
     return True
+
+# STORY_REVIEW_EXPANDER_ALIGNMENT_V1_20260906

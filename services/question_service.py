@@ -1,4 +1,8 @@
 from __future__ import annotations
+
+# CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
+
+# QUESTION_DIFFICULTY_COMPANION_VOICE_QUALITY_GATE_V1_20260906
 import random
 
 import json
@@ -18,7 +22,8 @@ from services.character_voice_service import build_companion_voice_rules
 
 
 QUESTION_COUNT = 5
-PROMPT_VERSION = "question_curriculum_v13_day6_character_voice"
+PROMPT_VERSION = "question_curriculum_v15_semantic_contract"
+# QUESTION_ANSWER_INTEGRITY_GATE_V1_20260904
 # DAY6_CHARACTER_VOICE_STORY_DIALOGUE_PROMPT_V1
 # DAY6_QUIZ_CHOICE_RANDOMIZER_V1
 
@@ -27,7 +32,9 @@ PROMPT_VERSION = "question_curriculum_v13_day6_character_voice"
 QUESTION_TIMEOUT_MS = 90_000
 QUESTION_MAX_RETRIES = 1
 QUESTION_THINKING_LEVEL = "low"
-QUESTION_MAX_OUTPUT_TOKENS = 3072
+# Five structured questions + answer_audit can exceed the old 3072-token cap.
+# Keep this as a question-only ceiling; prompt/schema and routing behavior stay unchanged.
+QUESTION_MAX_OUTPUT_TOKENS = 6144
 
 
 class QuestionGenerationError(RuntimeError):
@@ -44,6 +51,14 @@ class ConceptTargetMismatchError(ValueError):
 
 class DefinitionRecallQuestionError(ValueError):
     """Q1~Q4가 단순 용어/명칭 회상형 질문으로 되돌아갔을 때 사용."""
+
+
+class QuestionDifficultyQualityError(ValueError):
+    """중급/고급 문제의 보기 품질이 지나치게 쉬운 경우 사용."""
+
+
+class QuestionAnswerIntegrityError(ValueError):
+    """문제의 실제/자체검증 정답과 보기·correct_index가 일치하지 않을 때 사용."""
 
 
 QUESTION_SCHEMA = {
@@ -64,6 +79,7 @@ QUESTION_SCHEMA = {
             "question",
             "choices",
             "correct_index",
+            "answer_audit",
             "story_progress",
             "resolved_threads",
             "correct_feedback",
@@ -133,6 +149,50 @@ QUESTION_SCHEMA = {
                 "minimum": 0,
                 "maximum": 3,
             },
+
+            "answer_audit": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "kind",
+                    "canonical_answer",
+                    "calculation_expression",
+                    "calculated_value",
+                    "unit",
+                ],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["numeric", "non_numeric"],
+                    },
+                    "canonical_answer": {
+                        "type": "string",
+                        "description": (
+                            "shuffle 전 실제 정답 보기 문자열을 choices 중 하나와 정확히 동일하게 복사."
+                        ),
+                    },
+                    "calculation_expression": {
+                        "type": "string",
+                        "description": (
+                            "수치형이면 변수/단위/함수 없는 순수 산술식. 예: 1.2 * 2. "
+                            "비수치형이면 빈 문자열."
+                        ),
+                    },
+                    "calculated_value": {
+                        "type": "string",
+                        "description": (
+                            "수치형이면 산술식의 숫자 결과만 작성. 예: 2.4. "
+                            "비수치형이면 빈 문자열."
+                        ),
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": (
+                            "수치형 최종 정답 단위. 예: kg. 비수치형이면 빈 문자열."
+                        ),
+                    },
+                },
+            },
             "story_progress": {
                 "type": "string",
                 "description": (
@@ -179,6 +239,10 @@ REASONING_RULES = {
     "intermediate": """
 - 원인, 적절한 조치, 흐름, 관측 결과를 연결해 분석하게 한다.
 - 5개 중 최소 3개는 적용/진단형으로 만든다.
+- 각 문제는 가능하면 독립된 Evidence 조건 2개 이상을 함께 읽고 판단하게 한다.
+- 한눈에 보이는 극단값 하나를 찾는 데서 끝내지 말고, 왜 이상한지와 그 값을 어떻게 다룰지까지 구분하게 한다.
+- 평균/중앙값/보간/제외/원본 재확인처럼 실제로 경쟁 가능한 방법 사이의 trade-off를 고르게 한다.
+- 오답도 현실적으로 선택할 수 있는 방법이어야 하며, '모두 삭제/무조건 0/그대로 방치/임의의 극단값 대체' 같은 즉시 탈락 보기를 중급 문제의 주된 난이도 장치로 쓰지 않는다.
 """,
     "advanced": """
 - 아키텍처 선택, failure mode, trade-off, 운영 리스크를 종합 판단하게 한다.
@@ -195,7 +259,7 @@ def _strip_choice_prefix(value: object) -> str:
     """AI가 보기 문자열 안에 다시 번호를 넣어 UI에 2. 2. ...가 되는 현상을 제거한다."""
     text = _normalize_text(value)
     return re.sub(
-        r"^\s*(?:[①②③④]|\(?[1-4]\)?[.)]|[1-4]\s*번[.)]?)\s*",
+        r"^\s*(?:[①②③④]\s*|\([1-4]\)\s*[.)]?\s*|[1-4]\)\s*|[1-4]\.(?!\d)\s*|[1-4]\s*번[.)]?\s*)",
         "",
         text,
     ).strip()
@@ -263,6 +327,48 @@ def _is_definition_recall_question(value: object) -> bool:
         return False
     return any(pattern.search(text) for pattern in _DEFINITION_RECALL_PATTERNS)
 
+
+
+_OBVIOUS_THROWAWAY_CHOICE_PATTERNS = (
+    re.compile(r"(?:모두|전체|전부).{0,12}(?:즉시\s*)?(?:삭제|제거|파기)", re.IGNORECASE),
+    re.compile(r"(?:모두|전체|전부).{0,12}0(?:으로|으로\s+통일|으로\s+대체)", re.IGNORECASE),
+    re.compile(r"무조건.{0,10}(?:삭제|제거|0(?:으로)?|그대로|유지)", re.IGNORECASE),
+    re.compile(r"(?:정제|검증|확인)\s*없이.{0,12}(?:그대로|반영|확정|사용)", re.IGNORECASE),
+    re.compile(r"그대로.{0,10}(?:방치|반영|유지)", re.IGNORECASE),
+    re.compile(r"임의(?:로|의).{0,12}(?:채워|대체|변경|수정)", re.IGNORECASE),
+    re.compile(r"(?:최대|최소|극단)\s*(?:값|수치).{0,12}(?:대체|변경|수정)", re.IGNORECASE),
+)
+
+
+def _is_obvious_throwaway_choice(value: object) -> bool:
+    """중급 이상에서 비교 가치가 낮은 '즉시 탈락형' 보기를 보수적으로 감지한다."""
+    text = _normalize_text(value)
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _OBVIOUS_THROWAWAY_CHOICE_PATTERNS)
+
+
+def _validate_choice_difficulty_quality(
+    *,
+    choices: list[str],
+    correct_index: int,
+    requested_difficulty: str,
+    index: int,
+) -> None:
+    """중급/고급에서 오답 대부분이 극단적 shortcut이면 결과를 폐기한다."""
+    if requested_difficulty not in {"intermediate", "advanced"}:
+        return
+
+    throwaways = [
+        choice
+        for choice_index, choice in enumerate(choices)
+        if choice_index != correct_index and _is_obvious_throwaway_choice(choice)
+    ]
+    if len(throwaways) >= 2:
+        raise QuestionDifficultyQualityError(
+            f"{index}번 문제의 중급/고급 오답 중 비교 가치가 낮은 "
+            f"즉시 탈락형 보기가 {len(throwaways)}개입니다: {throwaways}"
+        )
 
 def _build_mastery_question_rules(adaptive_support: dict) -> str:
     """각 target Concept의 mastery 상태를 문제 설명량/적용 방식에 직접 연결한다."""
@@ -358,6 +464,327 @@ Theme 경험 규칙:
 """
 
 
+
+_NUMERIC_QUESTION_CUE_RE = re.compile(
+    r"(얼마|계산|환산|구하|값은|질량|총량|합계|평균|퍼센트|비율|농도)"
+)
+
+_DENSITY_RE = re.compile(
+    r"밀도(?:가|는|:)?\s*([-+]?\d+(?:\.\d+)?)\s*(kg|g)\s*/\s*(L|mL)",
+    re.IGNORECASE,
+)
+
+_VOLUME_RE = re.compile(
+    # 한글 조사(를/의/가...)는 Python regex에서 \\w로 취급되므로
+    # \\b를 쓰면 "2 L를", "3 mL의"가 매치되지 않는다.
+    # ASCII 영문자만 뒤따르는 경우를 차단해 단위 토큰을 안전하게 끝낸다.
+    r"(?<![/\w])([-+]?\d+(?:\.\d+)?)\s*(mL|L)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+
+
+def _parse_first_number(value: object) -> float | None:
+    text = _normalize_text(value).replace(",", "")
+    match = re.search(
+        r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)",
+        text,
+    )
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _numbers_close(left: float, right: float) -> bool:
+    return abs(left - right) <= max(
+        1e-9,
+        1e-9 * max(abs(left), abs(right), 1.0),
+    )
+
+
+def _safe_eval_numeric_expression(expression: str) -> float:
+    import ast as _ast
+    import operator as _operator
+
+    raw = _normalize_text(expression)
+    raw = (
+        raw.replace("×", "*")
+        .replace("÷", "/")
+        .replace("^", "**")
+    )
+    if not raw:
+        raise QuestionAnswerIntegrityError(
+            "수치형 문제의 calculation_expression이 비어 있습니다."
+        )
+
+    try:
+        tree = _ast.parse(raw, mode="eval")
+    except SyntaxError as exc:
+        raise QuestionAnswerIntegrityError(
+            "수치형 문제의 calculation_expression을 해석할 수 없습니다."
+        ) from exc
+
+    binary_ops = {
+        _ast.Add: _operator.add,
+        _ast.Sub: _operator.sub,
+        _ast.Mult: _operator.mul,
+        _ast.Div: _operator.truediv,
+        _ast.Pow: _operator.pow,
+    }
+    unary_ops = {
+        _ast.UAdd: _operator.pos,
+        _ast.USub: _operator.neg,
+    }
+
+    def _eval(node):
+        if isinstance(node, _ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, _ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(
+                node.value,
+                (int, float),
+            ):
+                raise QuestionAnswerIntegrityError(
+                    "산술식에 숫자가 아닌 값이 포함되어 있습니다."
+                )
+            return float(node.value)
+
+        if isinstance(node, _ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in binary_ops:
+                raise QuestionAnswerIntegrityError(
+                    "허용되지 않은 산술 연산입니다."
+                )
+            left = _eval(node.left)
+            right = _eval(node.right)
+            if op_type is _ast.Pow and abs(right) > 12:
+                raise QuestionAnswerIntegrityError(
+                    "비정상적으로 큰 거듭제곱을 허용하지 않습니다."
+                )
+            try:
+                return float(binary_ops[op_type](left, right))
+            except Exception as exc:
+                raise QuestionAnswerIntegrityError(
+                    "산술식을 안전하게 계산할 수 없습니다."
+                ) from exc
+
+        if isinstance(node, _ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in unary_ops:
+                raise QuestionAnswerIntegrityError(
+                    "허용되지 않은 단항 연산입니다."
+                )
+            return float(unary_ops[op_type](_eval(node.operand)))
+
+        raise QuestionAnswerIntegrityError(
+            "산술식에 변수/함수 등 허용되지 않은 요소가 포함되어 있습니다."
+        )
+
+    result = _eval(tree)
+    if not (-1e15 < result < 1e15):
+        raise QuestionAnswerIntegrityError(
+            "산술식 결과가 검증 범위를 벗어났습니다."
+        )
+    return result
+
+
+def _looks_like_numeric_question(
+    *,
+    question: str,
+    choices: list[str],
+) -> bool:
+    numeric_choices = sum(
+        1
+        for choice in choices
+        if _parse_first_number(choice) is not None
+    )
+    return bool(
+        numeric_choices >= 3
+        and _NUMERIC_QUESTION_CUE_RE.search(question)
+    )
+
+
+def _density_volume_expected_mass(
+    *,
+    question: str,
+    evidence_summary: str,
+    evidence_context: str,
+) -> tuple[float, str] | None:
+    source = " ".join(
+        (
+            _normalize_text(question),
+            _normalize_text(evidence_summary),
+            _normalize_text(evidence_context),
+        )
+    )
+
+    if "질량" not in source or "밀도" not in source:
+        return None
+
+    density = _DENSITY_RE.search(source)
+    if not density:
+        return None
+
+    density_value = float(density.group(1))
+    mass_unit = density.group(2)
+    volume_unit = density.group(3)
+
+    for volume in _VOLUME_RE.finditer(source):
+        if density.start() <= volume.start() < density.end():
+            continue
+        if volume.group(2).casefold() != volume_unit.casefold():
+            continue
+        return (
+            density_value * float(volume.group(1)),
+            mass_unit,
+        )
+
+    return None
+
+
+def _validate_answer_integrity(
+    *,
+    item: dict,
+    index: int,
+    question: str,
+    choices: list[str],
+    correct_index: int,
+) -> None:
+    audit = item.get("answer_audit")
+    if not isinstance(audit, dict):
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제에 answer_audit이 없습니다."
+        )
+
+    kind = _normalize_text(audit.get("kind")).casefold()
+    canonical_answer = _strip_choice_prefix(
+        audit.get("canonical_answer")
+    )
+
+    if kind not in {"numeric", "non_numeric"}:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 answer_audit.kind가 올바르지 않습니다."
+        )
+    if not canonical_answer:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 canonical_answer가 비어 있습니다."
+        )
+
+    canonical_matches = [
+        choice_index
+        for choice_index, choice in enumerate(choices)
+        if choice.casefold() == canonical_answer.casefold()
+    ]
+    if len(canonical_matches) != 1:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 canonical_answer "
+            f"'{canonical_answer}'가 보기 안에 정확히 1개 존재하지 않습니다."
+        )
+    if canonical_matches[0] != correct_index:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 correct_index가 canonical_answer를 가리키지 않습니다."
+        )
+
+    numeric_like = _looks_like_numeric_question(
+        question=question,
+        choices=choices,
+    )
+    if numeric_like and kind != "numeric":
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제는 수치 계산형으로 보이지만 answer_audit.kind가 numeric이 아닙니다."
+        )
+
+    if kind != "numeric":
+        return
+
+    expression = _normalize_text(
+        audit.get("calculation_expression")
+    )
+    declared_value = _parse_first_number(
+        audit.get("calculated_value")
+    )
+    expected_unit = _normalize_text(
+        audit.get("unit")
+    )
+
+    if declared_value is None:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 calculated_value가 숫자가 아닙니다."
+        )
+
+    local_value = _safe_eval_numeric_expression(
+        expression
+    )
+    if not _numbers_close(local_value, declared_value):
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 산술식 결과({local_value:g})와 "
+            f"calculated_value({declared_value:g})가 다릅니다."
+        )
+
+    correct_choice = choices[correct_index]
+    correct_choice_value = _parse_first_number(
+        correct_choice
+    )
+    if correct_choice_value is None:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 수치형 문제의 정답 보기에 숫자가 없습니다."
+        )
+    if not _numbers_close(correct_choice_value, local_value):
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 계산값({local_value:g})이 "
+            f"정답 보기 '{correct_choice}'와 일치하지 않습니다."
+        )
+
+    numeric_matches = [
+        choice_index
+        for choice_index, choice in enumerate(choices)
+        if (
+            (value := _parse_first_number(choice)) is not None
+            and _numbers_close(value, local_value)
+        )
+    ]
+    if numeric_matches != [correct_index]:
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 계산 정답이 보기 안에 정확히 1개 존재하지 않습니다."
+        )
+
+    if (
+        expected_unit
+        and expected_unit.casefold()
+        not in correct_choice.casefold()
+    ):
+        raise QuestionAnswerIntegrityError(
+            f"{index}번 문제의 정답 단위 '{expected_unit}'가 "
+            f"정답 보기 '{correct_choice}'에 없습니다."
+        )
+
+    density_mass = _density_volume_expected_mass(
+        question=question,
+        evidence_summary=item.get("evidence_summary", ""),
+        evidence_context=item.get("evidence_context", ""),
+    )
+    if density_mass is not None:
+        expected_mass, expected_mass_unit = density_mass
+        if not _numbers_close(
+            correct_choice_value,
+            expected_mass,
+        ):
+            raise QuestionAnswerIntegrityError(
+                f"{index}번 문제의 밀도×부피 검산값은 "
+                f"{expected_mass:g} {expected_mass_unit}인데 "
+                f"정답 보기는 '{correct_choice}'입니다."
+            )
+        if (
+            expected_mass_unit.casefold()
+            not in correct_choice.casefold()
+        ):
+            raise QuestionAnswerIntegrityError(
+                f"{index}번 문제의 질량 단위가 {expected_mass_unit}가 아닙니다."
+            )
+
 def _validate_questions(
     questions: list,
     target_concepts: list[str],
@@ -415,6 +842,22 @@ def _validate_questions(
         correct_index = item.get("correct_index")
         if not isinstance(correct_index, int) or not 0 <= correct_index <= 3:
             raise ValueError(f"{index}번 문제의 정답 인덱스가 올바르지 않습니다.")
+
+        _validate_choice_difficulty_quality(
+            choices=cleaned_choices,
+            correct_index=correct_index,
+            requested_difficulty=requested_difficulty,
+            index=index,
+        )
+
+        _validate_answer_integrity(
+            item=item,
+            index=index,
+            question=question,
+            choices=cleaned_choices,
+            correct_index=correct_index,
+        )
+        item.pop("answer_audit", None)
 
         concept = _normalize_text(item.get("concept"))
         if allowed and concept not in allowed:
@@ -548,6 +991,7 @@ def generate_chapter_questions(
     learning_objectives: list[str],
     *,
     target_concepts: list[str] | None = None,
+    concept_contracts: dict[str, dict[str, str]] | None = None,
     requested_difficulty: str = "basic",
     adaptive_support: dict | None = None,
     guide_name: str | None = None,
@@ -568,6 +1012,29 @@ def generate_chapter_questions(
         raise QuestionGenerationError(
             "이번 Chapter에서 평가할 학습 개념을 찾지 못했습니다."
         )
+
+    concept_contracts = concept_contracts or {}
+    active_concept_contracts: dict[str, dict[str, str]] = {}
+    for concept in target_concepts:
+        raw_contract = concept_contracts.get(concept)
+        if not isinstance(raw_contract, dict):
+            continue
+        normalized_contract = {
+            "core_rule": _normalize_text(raw_contract.get("core_rule")),
+            "common_misconception": _normalize_text(
+                raw_contract.get("common_misconception")
+            ),
+            "reasoning_boundary": _normalize_text(
+                raw_contract.get("reasoning_boundary")
+            ),
+        }
+        if all(normalized_contract.values()):
+            active_concept_contracts[concept] = normalized_contract
+
+    semantic_contracts_json = json.dumps(
+        active_concept_contracts,
+        ensure_ascii=False,
+    )
 
     theme_rules = get_theme_prompt_rules(theme)
     theme_profile = get_theme_experience_profile(theme)
@@ -648,6 +1115,18 @@ Theme: {theme}
 평가 Concept: {target_concepts}
 적응형 사고 난이도: {requested_difficulty}
 현재 Chapter 번호: {chapter_number or "미상"}
+
+[Curriculum Semantic Contract]
+{semantic_contracts_json}
+
+Semantic Contract 적용 규칙:
+- 각 question은 자신의 concept와 이름이 정확히 같은 Contract만 사용한다.
+- core_rule은 문제와 정답이 따라야 할 핵심 사실/판단 기준이다.
+- common_misconception을 정답 논리로 만들지 않는다. 필요하면 그럴듯한 오답 설계의 참고로만 사용한다.
+- reasoning_boundary를 넘어서는 원인·의도·일반화·확정 결론을 Evidence 없이 정답으로 만들지 않는다.
+- Contract가 없는 기존 Curriculum Concept은 지금까지의 pedagogy/Answer Integrity 규칙으로 안전하게 fallback한다.
+- Contract가 없다고 Question Generator가 임의의 Contract를 새로 만들거나 추측하지 않는다.
+- Theme 표현보다 실제 학습 개념의 정확성과 Semantic Contract의 경계를 우선한다.
 전체 Chapter 수: {target_chapter_count or "미상"}
 전체 마지막 Chapter 여부: {is_final_chapter}
 
@@ -782,7 +1261,24 @@ Concept별 실제 문제 작성 규칙:
 31. explanation은 중립적인 학습 노트로 정확한 용어를 사용해 1~2문장으로 정리한다.
 32. 입문/초급 explanation은 쉬운 설명 뒤 실제 용어를 연결한다.
 
+
+[Question Answer Integrity Gate v1]
+- 각 문제를 만든 뒤 보기를 쓰기 전에 실제 정답을 먼저 독립적으로 계산/판단한다.
+- answer_audit.canonical_answer에는 shuffle 전 choices 중 실제 정답 보기 하나를 철자·숫자·단위까지 그대로 복사한다.
+- correct_index는 반드시 그 canonical_answer의 현재 choices 위치를 가리킨다.
+- canonical_answer는 choices에 정확히 1개만 존재해야 한다.
+- 수치 계산형 문제라면 answer_audit.kind="numeric"으로 한다.
+- numeric이면 calculation_expression에 변수명/단위/함수 없이 순수 산술식만 쓴다. 예: 1.2 * 2
+- numeric이면 calculated_value에는 계산 결과 숫자만 쓴다. 예: 2.4
+- numeric이면 unit에는 최종 정답 단위를 쓴다. 예: kg
+- 수치형에서 계산 결과와 같은 숫자·단위의 보기가 정확히 1개 존재하지 않으면 그 문제는 출력 전에 다시 작성한다.
+- 특히 밀도×부피=질량처럼 값과 단위가 주어진 문제는 단위까지 다시 검산한다.
+- non_numeric이면 calculation_expression/calculated_value/unit은 빈 문자열로 둔다.
+- answer_audit은 내부 검증용이며 Story나 학습 피드백에 노출하지 않는다.
+
 [출력 전 내부 점검 - 출력에는 쓰지 말 것]
+- 각 문제의 canonical_answer가 choices에 정확히 1개 있고 correct_index가 그 보기를 가리키는가?
+- 수치형 문제는 calculation_expression을 다시 계산했을 때 calculated_value와 정답 보기 숫자·단위가 일치하는가?
 - 각 question의 concept 상태가 weak/review/strong/unseen 중 무엇인지 확인했고, 그 상태에 맞게 concept_brief 설명량을 실제로 바꿨는가?
 - strong Concept를 처음 배우는 사람처럼 'X란 ~이다'로 다시 강의하고 있지 않은가? strong의 concept_brief는 개념 사실이 아니라 중립적인 적용/비교/종합 지시 1문장인가?
 - Q5가 strong Concept라면 concept_brief에서 '원본이 보존되므로 복구 가능', '규칙을 수정하면 해결'처럼 정답 결론을 먼저 말하고 있지 않은가?
@@ -831,6 +1327,7 @@ Concept별 실제 문제 작성 규칙:
                 "chapter_title": chapter_title,
                 "chapter_story": chapter_story,
                 "target_concepts": target_concepts,
+                "concept_contracts": active_concept_contracts,
                 "requested_difficulty": requested_difficulty,
                 "adaptive_support_mode": adaptive_support.get("mode"),
                 "adaptive_support_label": adaptive_support.get("label"),
@@ -875,11 +1372,26 @@ Concept별 실제 문제 작성 규칙:
             "문제 준비를 다시 눌러 새로 생성해주세요."
         ) from exc
 
+    except QuestionDifficultyQualityError as exc:
+        raise QuestionGenerationError(
+            "생성된 중급/고급 문제의 보기 중 비교 가치가 낮은 즉시 탈락형 오답이 "
+            "과도하게 포함되어 해당 결과를 폐기했습니다. "
+            "중급 이상에서는 여러 그럴듯한 방법·원인·조치 사이의 비교 판단을 우선합니다. "
+            "자동 재생성은 하지 않았습니다. 문제 준비를 다시 눌러 새로 생성해주세요."
+        ) from exc
+
     except EvidenceAnswerLeakError as exc:
         raise QuestionGenerationError(
             "생성된 문제의 증거 자료가 정답을 직접 노출해 해당 결과를 폐기했습니다. "
             "일일 AI 요청량을 불필요하게 쓰지 않도록 자동 재생성은 하지 않았습니다. "
             "문제 준비를 다시 눌러 새로 생성해주세요."
+        ) from exc
+
+    except QuestionAnswerIntegrityError as exc:
+        raise QuestionGenerationError(
+            "생성된 문제의 정답/보기 자체검증에 실패해 해당 결과를 폐기했습니다. "
+            "수치 계산과 정답 보기 불일치가 학습 기록에 들어가는 것을 막기 위한 검증입니다. "
+            "자동 재생성은 하지 않았습니다. 문제 준비를 다시 눌러 새로 생성해주세요."
         ) from exc
 
     except AIQuotaExhausted as exc:
@@ -899,3 +1411,9 @@ Concept별 실제 문제 작성 규칙:
             "문제를 생성하는 중 AI 요청 또는 형식 오류가 발생했습니다. "
             "잠시 후 다시 시도해주세요."
         ) from exc
+
+# QUESTION_ANSWER_INTEGRITY_GATE_V1_0_1_VOLUME_PARTICLE_HOTFIX_20260904
+
+# QUESTION_ANSWER_INTEGRITY_GATE_V1_0_2_DECIMAL_CHOICE_PREFIX_HOTFIX_20260904
+
+# QUESTION_ANSWER_INTEGRITY_GATE_V1_0_3_PARENTHESIZED_PREFIX_HOTFIX_20260904

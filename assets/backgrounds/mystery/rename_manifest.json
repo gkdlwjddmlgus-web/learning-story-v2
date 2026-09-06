@@ -1,0 +1,46 @@
+{
+  "theme": "mystery",
+  "count": 8,
+  "files": [
+    {
+      "index": 1,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 10_27_14 (10).png",
+      "renamed": "map1.png"
+    },
+    {
+      "index": 2,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 10_49_13 (10).png",
+      "renamed": "map2.png"
+    },
+    {
+      "index": 3,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 10_49_13 (9).png",
+      "renamed": "map3.png"
+    },
+    {
+      "index": 4,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 11_27_16 (1).png",
+      "renamed": "map4.png"
+    },
+    {
+      "index": 5,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 11_27_16 (2).png",
+      "renamed": "map5.png"
+    },
+    {
+      "index": 6,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 11_27_17 (3).png",
+      "renamed": "map6.png"
+    },
+    {
+      "index": 7,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 11_27_17 (4).png",
+      "renamed": "map7.png"
+    },
+    {
+      "index": 8,
+      "original": "ChatGPT Image 2026년 9월 4일 오후 11_27_18 (5).png",
+      "renamed": "map8.png"
+    }
+  ]
+}

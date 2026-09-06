@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
+
 import json
 from typing import Any
 
@@ -22,7 +24,7 @@ from services.experience_profile_service import (
 )
 
 
-CURRICULUM_PROMPT_VERSION = "curriculum_v3_pedagogy"
+CURRICULUM_PROMPT_VERSION = "curriculum_v4_semantic_contract"
 BLUEPRINT_PROMPT_VERSION = "blueprint_v3_theme_arc"
 
 CURRICULUM_SCHEMA = {
@@ -60,6 +62,7 @@ CURRICULUM_SCHEMA = {
                     "initial_difficulty",
                     "reviewable",
                     "description",
+                    "semantic_contract",
                 ],
                 "properties": {
                     "name": {"type": "string"},
@@ -76,6 +79,20 @@ CURRICULUM_SCHEMA = {
                     },
                     "reviewable": {"type": "boolean"},
                     "description": {"type": "string"},
+                    "semantic_contract": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [
+                            "core_rule",
+                            "common_misconception",
+                            "reasoning_boundary",
+                        ],
+                        "properties": {
+                            "core_rule": {"type": "string"},
+                            "common_misconception": {"type": "string"},
+                            "reasoning_boundary": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
@@ -215,6 +232,12 @@ def _ensure_curriculum(
 - Story 세계관 용어로 Concept 이름을 바꾸지 않는다.
 - 사용자의 현재 수준과 목표를 Concept 순서와 출발점에 직접 반영한다.
 - 각 Concept description에는 "무엇을 배우는지"를 현재 수준에서 이해할 수 있는 말로 쓴다.
+- 각 Concept의 semantic_contract에는 주제에 맞는 정확한 현실 지식을 3문장으로 압축한다.
+  - core_rule: 이 Concept에서 반드시 지켜야 할 핵심 원리/판단 기준 1문장.
+  - common_misconception: 학습자가 흔히 범하는 대표 오개념/잘못된 일반화 1문장.
+  - reasoning_boundary: 현재 Concept의 근거만으로 넘어서면 안 되는 추론/결론의 경계 1문장.
+- semantic_contract는 특정 분야용 고정 템플릿이 아니다. 현재 학습 주제와 Concept에 맞게 동적으로 작성한다.
+- Story 세계관 표현이나 캐릭터 말투를 semantic_contract에 넣지 않는다. 실제 학습 개념의 정확성을 우선한다.
 - 앞 Concept를 배우지 않고 뒤 Concept를 알아야만 이해되는 역전된 순서를 만들지 않는다.
 - 기초부터 응용까지 이어지는 5~24개의 Concept sequence를 만든다.
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
+
 import hashlib
 from typing import Any
 
@@ -74,6 +76,11 @@ def mock_curriculum(context: dict[str, Any]) -> dict:
             "initial_difficulty": "intro" if i<=2 else ("basic" if i<=4 else "intermediate"),
             "reviewable": True,
             "description": f"{concept}의 의미와 활용을 학습한다.",
+            "semantic_contract": {
+                "core_rule": f"{concept}의 핵심 원리와 적용 기준을 정확히 사용한다.",
+                "common_misconception": f"{concept}을 이름만 보고 단순화하거나 다른 개념과 혼동하는 것.",
+                "reasoning_boundary": f"주어진 근거가 뒷받침하는 범위를 넘어 {concept}에 대한 결론을 단정하지 않는다.",
+            },
         })
     return {"summary": f"{topic}을 기초에서 응용까지 단계적으로 익히는 개발용 Curriculum이다.", "categories": categories, "concept_sequence": seq}
 

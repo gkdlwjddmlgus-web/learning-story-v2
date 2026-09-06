@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
+
 from typing import Any
 
 
@@ -20,6 +22,50 @@ def _dedupe_concepts(*groups: list[str] | None) -> list[str]:
             concept = str(concept or "").strip()
             if concept and concept not in result:
                 result.append(concept)
+    return result
+
+
+def get_concept_contracts(
+    *,
+    curriculum: dict[str, Any] | None,
+    target_concepts: list[str] | None,
+) -> dict[str, dict[str, str]]:
+    """
+    현재 target Concept에 해당하는 Curriculum semantic contract만 반환한다.
+
+    기존 Curriculum에는 semantic_contract가 없을 수 있으므로 안전하게 건너뛴다.
+    DB 접근이나 AI 생성은 하지 않는다.
+    """
+    targets = {
+        str(name or "").strip()
+        for name in (target_concepts or [])
+        if str(name or "").strip()
+    }
+    if not targets:
+        return {}
+
+    result: dict[str, dict[str, str]] = {}
+    for item in _sequence(curriculum):
+        name = str(item.get("name") or "").strip()
+        if not name or name not in targets:
+            continue
+
+        raw = item.get("semantic_contract")
+        if not isinstance(raw, dict):
+            continue
+
+        contract = {
+            "core_rule": str(raw.get("core_rule") or "").strip(),
+            "common_misconception": str(
+                raw.get("common_misconception") or ""
+            ).strip(),
+            "reasoning_boundary": str(
+                raw.get("reasoning_boundary") or ""
+            ).strip(),
+        }
+        if all(contract.values()):
+            result[name] = contract
+
     return result
 
 

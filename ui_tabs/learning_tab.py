@@ -1,6 +1,8 @@
 # DAY5_EVENT_FLUSH_FIX_V1
 from __future__ import annotations
 
+# CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
+
 import hashlib
 import logging
 import html
@@ -75,6 +77,12 @@ from services.dev_config import generation_mode_label, is_ai_mock_enabled
 from services.event_service import (
     queue_event,
     queue_once,
+)
+from services.curriculum_service import (
+    get_concept_contracts,
+)
+from services.foundation_service import (
+    get_world_foundation,
 )
 from services.experience_profile_service import (
     get_learner_level_profile,
@@ -383,14 +391,27 @@ def _format_choice_reply(
 ) -> str:
     """사용자 답변은 추론을 대신 말하지 않고 선택 사실만 중립적으로 보여준다."""
     clean = _sanitize_learning_text(choice_text)
+
+    # QUIZ_ANSWER_REPLY_DECIMAL_HOTFIX_V1_0_1
+    # 소수 "2.4 kg"의 "2."를 보기 번호로 오인하지 않는다.
+    # 실제 보기 번호 prefix만 제거한다.
     clean = re.sub(
-        r"^\s*(?:[①②③④]|\(?[1-4]\)?[.)]|[1-4]\s*번[.)]?)\s*",
+        r"^\s*(?:"
+        r"[①②③④]\s*|"
+        r"\([1-4]\)\s*[.)]?\s*|"
+        r"[1-4]\)\s*|"
+        r"[1-4]\.(?!\d)\s*|"
+        r"[1-4]\s*번[.)]?\s*"
+        r")",
         "",
         clean,
     ).strip()
+
     if len(clean) > 110:
         clean = clean[:107].rstrip() + "..."
+
     return f"{choice_number}번 · {clean}"
+
 
 
 def _render_learning_materials(
@@ -1077,13 +1098,18 @@ def _render_chapter_story(
     # Investigation이 viewport 상단에 더 빨리 도달하도록 한다.
     tool_left, tool_right = st.columns(2, gap="small")
     with tool_left:
-        st.markdown('<span class="compact-learning-tools-marker"></span>', unsafe_allow_html=True)
         render_story_experience(
             chapter_id=chapter[0],
             theme=world[4],
             story_text=chapter[4],
             chapter_number=chapter[2],
             chapter_title=format_inline_text(chapter[3]),
+        )
+        # Marker는 기존 compact/mobile CSS selector 호환을 위해 유지하되,
+        # expander 앞에 별도 Streamlit element gap을 만들지 않도록 뒤로 이동한다.
+        st.markdown(
+            '<span class="compact-learning-tools-marker"></span>',
+            unsafe_allow_html=True,
         )
 
     with tool_right:
@@ -2531,6 +2557,15 @@ def render_learning_tab(
                         world[0]
                     )
                 )
+                foundation = get_world_foundation(
+                    world[0]
+                )
+                concept_contracts = get_concept_contracts(
+                    curriculum=(
+                        (foundation or {}).get("curriculum")
+                    ),
+                    target_concepts=targets,
+                )
 
                 spinner_text = experience_profile["spinner_label"].format(
                     count=QUESTION_COUNT
@@ -2558,6 +2593,9 @@ def render_learning_tab(
                                 ),
                                 target_concepts=(
                                     targets
+                                ),
+                                concept_contracts=(
+                                    concept_contracts
                                 ),
                                 requested_difficulty=(
                                     requested_difficulty
@@ -2641,3 +2679,7 @@ def render_learning_tab(
 # DAY6_RESTORE_STACKED_STICKY_EVIDENCE_V1
 
 # DAY6_DOUBLE_STICKY_COMPACT_TUNING_V1
+
+# QUIZ_ANSWER_REPLY_DECIMAL_HOTFIX_V1_0_1_20260904
+
+# COMPACT_TOOLS_ROW_ALIGNMENT_V1_20260906

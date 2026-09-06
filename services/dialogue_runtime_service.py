@@ -10,6 +10,7 @@ from services.dev_config import is_dialogue_runtime_enabled
 
 
 # DAY6_DIALOGUE_RUNTIME_SERVICE_V2
+# DIALOGUE_SPEAKER_PORTRAIT_INTEGRITY_V1_20260904\n# DIALOGUE_SAME_PARAGRAPH_COMPANION_ACTION_V1_1_20260906
 
 _QUOTE_PATTERN = re.compile(
     r'([“"][^”"\n]+[”"])'
@@ -272,43 +273,110 @@ def _is_guide_action_narration(
     )
 
 
+def _previous_paragraph_guide_focus(
+    text: str,
+    guide_name: str | None,
+) -> bool:
+    """
+    바로 앞 문단의 마지막 문장이 Companion을 중심으로 끝났는지 보수적으로 확인한다.
+
+    용도:
+    루루가 고개를 갸웃했다.
+
+    “이 흐름이 조금 묘해.”
+
+    처럼 행동 서술과 직접 대사가 문단 경계로 분리된 경우에만
+    다음 따옴표 문장을 Companion 대사로 이어준다.
+    """
+    clean = _clean_text(text)
+    guide = _clean_text(guide_name)
+
+    if not clean or not guide:
+        return False
+
+    sentences = _split_sentences(clean)
+    last = sentences[-1] if sentences else clean
+
+    return bool(
+        re.match(
+            rf"^(?:(?:그리고|그러자|그때|잠시 후|잠시|곧|이내)\s+)?"
+            rf"{re.escape(guide)}(?:이|가|은|는)\s*",
+            last,
+        )
+    )
+
+def _same_paragraph_guide_action_focus(
+    text: str,
+    guide_name: str | None,
+) -> bool:
+    """
+    같은 문단에서 직접 대사 바로 앞 서술의 마지막 문장이
+    Companion을 문법적 주체로 두는 행동 서술인지 보수적으로 확인한다.
+
+    예:
+    소리 없이 다가온 무무가 먹물이 번진 난을 꼬리로 가리켰다.
+    “서첩과 장부의 기록이 군데군데 맞지 않네.”
+
+    앞 서술은 Narrator beat로 유지하고,
+    이어지는 quote만 Companion beat로 분리한다.
+    """
+    clean = _clean_text(text)
+    guide = _clean_text(guide_name)
+
+    if not clean or not guide:
+        return False
+
+    sentences = _split_sentences(clean)
+    last = sentences[-1] if sentences else clean
+
+    guide_subject = re.search(
+        rf"(?<![가-힣A-Za-z0-9_·])"
+        rf"{re.escape(guide)}(?:이|가|은|는)\b",
+        last,
+    )
+    if not guide_subject:
+        return False
+
+    prefix = last[:guide_subject.start()]
+    if re.search(
+        r"(?:나는|내가|우리는|우리가|"
+        r"당신은|당신이|사용자는|사용자가|"
+        r"주인공은|주인공이)",
+        prefix,
+    ):
+        return False
+
+    return True
+
+
 def _speaker_from_quote_context(
     *,
     quote_text: str,
     previous_text: str,
     next_text: str,
     guide_name: str | None,
+    previous_paragraph_text: str = "",
 ) -> tuple[str, str]:
     """
-    따옴표 대사의 화자를 앞/뒤 문맥에서 판정한다.
+    따옴표 대사의 화자를 판정한다.
 
     우선순위:
-    1. '고양이이름, ...' 호격 -> Player
-    2. 고양이 이름 + 발화 동사 -> Companion
-    3. Player 표지 + 발화 동사 -> Player
-    4. 이름 + 발화 동사 -> NPC
+    1. 같은 문단의 명시적 Player 발화 표지 -> Player
+    2. 같은 문단의 이름 + 발화 동사 -> Companion/NPC
+    3. 같은 문단에 Companion 이름 + 발화 동사 -> Companion
+    4. 문단 시작 따옴표이고 직전 문단 마지막 문장이 Companion 중심 행동이면 -> Companion
     5. 불명확 -> Narrator
+
+    Agency Gate 정합성:
+    - 단순히 '루루, ...'라고 시작한다는 이유만으로 Player 대사로 추정하지 않는다.
+    - Player는 명시적 발화 attribution이 있을 때만 legacy 호환으로 분류한다.
     """
-    quote = _clean_text(quote_text)
     previous = _clean_text(previous_text)[-_CONTEXT_CHARS:]
     following = _clean_text(next_text)[:_CONTEXT_CHARS]
     context = _clean_text(
         f"{previous} {following}"
     )
     guide = _clean_text(guide_name)
-
-    if _is_guide_vocative(
-        quote,
-        guide,
-    ):
-        return "player", "나"
-
-    if (
-        guide
-        and guide in context
-        and _SPEECH_VERB_PATTERN.search(context)
-    ):
-        return "companion", guide
 
     if (
         _PLAYER_HINT_PATTERN.search(context)
@@ -330,11 +398,37 @@ def _speaker_from_quote_context(
         ).strip()
 
         if speaker:
-            if guide and speaker == guide:
+            if (
+                guide
+                and (
+                    speaker == guide
+                    or speaker.endswith(" " + guide)
+                )
+            ):
                 return "companion", guide
             return "npc", speaker
 
+    if _same_paragraph_guide_action_focus(
+        previous_text,
+        guide,
+    ):
+        return "companion", guide
+
+    if (
+        guide
+        and guide in context
+        and _SPEECH_VERB_PATTERN.search(context)
+    ):
+        return "companion", guide
+
+    if _previous_paragraph_guide_focus(
+        previous_paragraph_text,
+        guide,
+    ):
+        return "companion", guide
+
     return "narrator", "NARRATOR"
+
 
 
 def _classify_plain_sentence(
@@ -343,19 +437,17 @@ def _classify_plain_sentence(
     guide_name: str | None,
 ) -> tuple[str, str]:
     """
-    따옴표 밖의 일반 Story 문장 분류.
+    따옴표 밖의 일반 Story 문장은 Narrator로 유지한다.
 
-    - '루루, ...' -> Player
-    - '루루가/루루는 ~했다' -> Narrator
-    - 그 외 불명확 문장 -> Narrator
+    Agency Gate 정합성:
+    - '루루, ...' 같은 호격만 보고 Player 발화로 추정하지 않는다.
+    - '루루가/루루는 ~했다'는 Companion 행동을 서술하는 Narrator 문장이다.
+    - 명시적 직접 대사는 _speaker_from_quote_context에서만 화자를 판정한다.
     """
     clean = _clean_text(sentence)
 
-    if _is_guide_vocative(
-        clean,
-        guide_name,
-    ):
-        return "player", "나"
+    if not clean:
+        return "narrator", "NARRATOR"
 
     if _is_guide_action_narration(
         clean,
@@ -364,6 +456,7 @@ def _classify_plain_sentence(
         return "narrator", "NARRATOR"
 
     return "narrator", "NARRATOR"
+
 
 
 def _append_beat(
@@ -442,21 +535,23 @@ def build_dialogue_beats(
     """
     Existing plain-text Story를 Dialogue Beat로 변환한다.
 
-    DAY6 Runtime Adapter v2 규칙:
-    1. 따옴표 대사를 먼저 잡는다.
-    2. 대사 앞/뒤 화자 표지가 있으면 speaker를 확정한다.
-    3. '고양이이름, ...' 호격은 Player로 본다.
-    4. '고양이이름이/가/은/는 ~했다'는 Narrator 서술로 본다.
-    5. 불명확하면 Narrator로 유지한다.
-    6. 같은 화자도 너무 길면 Scene을 분절한다.
-    7. 한 Scene은 MAX_SCENE_CHARS / MAX_SCENE_SENTENCES를 넘지 않는다.
+    Speaker / Portrait Integrity v1:
+    1. 같은 문단의 명시적 attribution을 최우선한다.
+    2. 문단이 직접 대사로 시작하고 바로 앞 문단의 마지막 문장이
+       Companion 중심 행동이면 그 대사를 Companion으로 이어준다.
+    3. 단순 호격만으로 Player를 추정하지 않는다.
+    4. 불명확한 직접 대사는 Narrator로 둔다.
+    5. 기존 Scene 길이 제한과 원문 보존 규칙을 유지한다.
 
     원문/DB/AI Prompt를 수정하거나 재생성하지 않는다.
     """
     beats: list[DialogueBeat] = []
-
-    for paragraph in _split_paragraphs(
+    paragraphs = _split_paragraphs(
         story_text
+    )
+
+    for paragraph_index, paragraph in enumerate(
+        paragraphs
     ):
         parts = _QUOTE_PATTERN.split(
             paragraph
@@ -490,6 +585,17 @@ def build_dialogue_beats(
                 else ""
             )
 
+            # Cross-paragraph attribution은 따옴표가 현재 문단의 첫 실질 내용일 때만 허용한다.
+            # 같은 문단 앞쪽에 서술이 있으면 그 local context가 더 강한 근거다.
+            previous_paragraph_text = ""
+            if (
+                paragraph_index > 0
+                and not _clean_text(previous_text)
+            ):
+                previous_paragraph_text = (
+                    paragraphs[paragraph_index - 1]
+                )
+
             quote_text = _strip_quote(
                 part
             )
@@ -500,6 +606,7 @@ def build_dialogue_beats(
                     previous_text=previous_text,
                     next_text=next_text,
                     guide_name=guide_name,
+                    previous_paragraph_text=previous_paragraph_text,
                 )
             )
 
@@ -523,6 +630,7 @@ def build_dialogue_beats(
             )
 
     return beats
+
 
 
 def dialogue_index_key(chapter_id: int) -> str:

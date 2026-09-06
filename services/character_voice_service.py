@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# QUESTION_DIFFICULTY_COMPANION_VOICE_QUALITY_GATE_V1_20260906
+
 # DAY6_CHARACTER_VOICE_SERVICE_V1
 # DAY6_STORY_DIALOGUE_COHERENCE_V1
 _THEME_ALIASES = {"현대": "미스터리", "모험": "판타지"}
@@ -27,6 +29,12 @@ _THEME_VOICE = {
         "rhythm": "짧고 여백 있다. 비유는 한 번 정도만 쓰고 현학적인 사자성어/고어체를 남발하지 않는다.",
         "cat": "Story에서 수염이 떨리거나 소리 없이 발을 옮기고 꼬리로 방향을 가리키는 행동을 가끔 쓴다.",
         "avoid": "모든 문장을 무협 명언으로 만들기, 스승-제자 훈계체, 기술 용어를 무공명으로 바꾸기.",
+        "learning": (
+            "학습 직접 발화에서는 정확한 기술 용어를 무공명으로 바꾸지 않되, 현대 분석 보고서를 그대로 낭독하지 않는다. "
+            "먼저 강호 속 기록·흔적·길·대조 같은 관찰 언어로 말하고, 전문 용어가 꼭 필요하면 한 문장에 하나 정도만 보조적으로 붙인다. "
+            "'시스템 전송 중 누락', '데이터 입력 규칙 오류', '향후 분석 결과의 신뢰도' 같은 보고서체는 "
+            "'옮겨 적는 길목에서 빠졌는지', '적는 법이 어긋났는지', '뒤 판단까지 흐려질지'처럼 세계 안의 말로 풀어낸다."
+        ),
     },
     "미스터리": {
         "identity": "단서를 좋아하는 탐정 고양이. 정답을 아는 명탐정이 아니라 사용자와 같은 시점에서 작은 모순을 발견한다.",
@@ -62,6 +70,8 @@ def build_companion_voice_rules(*, theme: str | None, guide_name: str | None, sc
         if scope == "story" else
         "concept_brief/correct_feedback/wrong_feedback는 직접 발화 본문이다. 화자 이름·따옴표·괄호형 행동지문을 넣지 않고 관찰 방식과 말의 리듬으로 고양이다움을 드러낸다."
     )
+    if scope != "story" and p.get("learning"):
+        scope_rule += " " + str(p["learning"])
     lines = [
         f"- 이름: {_name(guide_name)}", f"- 테마: {t}", f"- 정체성: {p['identity']}",
         f"- 말의 리듬: {p['rhythm']}", f"- 고양이 행동 표현: {p['cat']}", f"- 피할 것: {p['avoid']}",
@@ -81,22 +91,18 @@ def build_story_dialogue_distribution_rules(*, theme: str | None, guide_name: st
         f"- 현재 Companion: {name} / Theme: {t}",
         "- Story는 자연스러운 산문으로 쓴다. NARRATOR:/PLAYER:/COMPANION: 같은 라벨을 출력하지 않는다.",
         "- 짧은 Chapter 도입을 대략 5~7개의 논리적 beat로 느껴지게 구성한다.",
-        "- 가능하면 Companion의 직접 발화를 최소 2회, Player의 직접 발화를 최소 1회 포함한다.",
-        "- Narrator만 3개 이상의 논리적 beat가 연속되지 않게 하고 상황 설명 뒤에는 Player/Companion의 반응·질문을 배치한다.",
-        "- Companion의 두 대사는 같은 설명을 반복하지 않는다. 관찰/감정/의문과 반응/행동 제안처럼 역할을 달리한다.",
-        "- Player도 수동적으로 설명만 듣지 않는다. 관찰을 말하거나 Companion에게 질문하거나 다음 행동을 제안한다.",
+        "- Companion의 직접 발화는 필요할 때 1~2회 사용할 수 있다. 억지로 대사 수를 채우지 않는다.",
+        "- Player의 직접 발화는 AI가 만들지 않는다. Player의 생각·감정·의사결정·의도적 행동도 임의로 만들지 않는다.",
+        "- Story Choice가 존재해도 그 선택을 Player 대사로 바꾸거나 새로운 의도를 덧붙이지 않는다.",
+        "- Story Choice는 이미 일어난 선택으로 취급하고, 그 선택 때문에 세계/NPC/상황에 생긴 결과를 서술한다.",
+        "- Companion/NPC의 질문 뒤에 Player가 반드시 대답해야 한다고 가정하지 않는다. 질문은 열린 상태로 남겨도 된다.",
+        "- Narrator beat가 연속되어도 괜찮다. Player 대사를 억지로 삽입하는 것보다 Agency 보존을 우선한다.",
         "- 직접 대사는 한국어 큰따옴표 “...”를 사용한다.",
-        f"- Companion 대사는 가까운 문맥에 '{name}가 말했다/물었다/중얼거렸다/덧붙였다' 같은 발화 attribution을 명확히 둔다.",
-        "- Player 대사는 가까운 문맥에 '내가 말했다/물었다/대답했다'처럼 화자를 명확히 둔다.",
-        "- 발화 attribution을 썼다면 실제 직접 대사 “...”를 같은 문장 또는 바로 이어지는 문장에 반드시 포함한다.",
-        "- '내가 배관을 보며 대답했다.', '내가 물었다.', '내가 말했다.'처럼 발화 동사만 있고 실제 Player 발화가 없는 문장을 절대 단독 beat로 만들지 않는다.",
-        "- Companion이 질문한 뒤 Player가 대답했다고 서술했다면, Companion이 다시 말하기 전에 Player의 실제 직접 대사 내용이 반드시 한 번 등장해야 한다.",
-        "- Player turn은 '대답했다/말했다'라는 행동 설명이 아니라 관찰·질문·판단·제안 중 실제 의미가 있는 발화 내용이어야 한다.",
-        "- turn-taking 예: Companion 질문 → Player 직접 대사 → Companion 반응. Player가 대답했다고 서술만 한 뒤 Companion 대사로 건너뛰지 않는다.",
-        f"- 형식 예: {name}가 귀를 쫑긋 세우며 말했다. “저 두 기록, 같은 걸 말하는데 숫자가 다르네.”",
-        "- 형식 예: 내가 기록을 번갈아 보며 물었다. “단위부터 맞춰봐야 하는 걸까?”",
-        "- 예시는 형식만 참고하고 그대로 복사하지 않는다.",
+        f"- Companion 대사는 가까운 문맥에 '{name}가 말했다/물었다/중얼거렸다/덧붙였다' 같은 발화 attribution을 둔다.",
+        "- Player가 실제로 선택해야 하는 지점은 Story Choice 또는 Question UI로 넘긴다.",
         "- Dialogue를 늘리더라도 Story ↔ Question reasoning boundary를 절대 약화하지 않는다.",
         "- Question에서 판단할 원인/단계/정답 Concept/가설 결과/복구 결론은 대사에서도 먼저 확정하지 않는다.",
-        "- Companion은 답을 아는 안내자가 아니라 함께 이상을 발견하고 다음 조사로 연결하는 동료다.",
+        "- Companion은 답을 아는 안내자가 아니라 함께 세계를 경험하고 반응하는 동료다.",
     ])
+
+# STORY_AGENCY_CONTINUITY_GATE_V1_2_20260904
