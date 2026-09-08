@@ -61,7 +61,6 @@ from repositories.attempt_repository import (
     get_attempted_question_texts,
 )
 from repositories.chapter_repository import (
-    get_chapter,
     mark_chapter_completed,
     update_chapter_questions,
 )
@@ -105,6 +104,11 @@ from services.question_service import (
 )
 from services.story_context_service import (
     get_story_context,
+)
+from services.chapter_runtime_service import (
+    get_runtime_chapter,
+    invalidate_runtime_chapter,
+    invalidate_runtime_world,
 )
 from services.story_engine_service import (
     apply_completed_chapter_state,
@@ -1394,6 +1398,14 @@ def render_chapter_complete(
         world[4]
     )
 
+    runtime_chapter_dirty = (
+        not bool(chapter[7])
+        or (
+            len(chapter) > 13
+            and not bool(chapter[13])
+        )
+    )
+
     if not chapter[7]:
         mark_chapter_completed(
             chapter_id=chapter[0]
@@ -1404,6 +1416,12 @@ def render_chapter_complete(
         world_id=world[0],
         chapter=chapter,
     )
+
+    if runtime_chapter_dirty:
+        invalidate_runtime_chapter(
+            world_id=world[0],
+            chapter_number=chapter[2],
+        )
 
     context = get_story_context(
         world[0]
@@ -1549,7 +1567,7 @@ def render_chapter_complete(
         chapter[2] + 1
     )
 
-    next_chapter = get_chapter(
+    next_chapter = get_runtime_chapter(
         world_id=world[0],
         chapter_number=(
             next_chapter_number
@@ -1606,6 +1624,10 @@ def render_chapter_complete(
                     personalization=(
                         personalization
                     ),
+                )
+
+                invalidate_runtime_world(
+                    world[0]
                 )
 
                 update_current_chapter(
@@ -2369,7 +2391,7 @@ def render_learning_tab(
     user,
     world,
 ):
-    chapter = get_chapter(
+    chapter = get_runtime_chapter(
         world_id=world[0],
         chapter_number=world[7],
     )
@@ -2402,6 +2424,10 @@ def render_learning_tab(
                     ensure_initial_story_block(
                         user=user,
                         world=world,
+                    )
+
+                    invalidate_runtime_world(
+                        world[0]
                     )
 
                     update_current_chapter(
@@ -2650,6 +2676,11 @@ def render_learning_tab(
                             questions=(
                                 generated_questions
                             ),
+                        )
+
+                        invalidate_runtime_chapter(
+                            world_id=world[0],
+                            chapter_number=chapter[2],
                         )
 
                         reset_quiz_state()

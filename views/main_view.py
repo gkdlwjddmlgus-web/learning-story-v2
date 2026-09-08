@@ -20,8 +20,8 @@ from components.theme_system import (
     apply_theme_styles,
     get_theme_pack,
 )
-from repositories.chapter_repository import (
-    get_chapter,
+from services.chapter_runtime_service import (
+    get_runtime_chapter,
 )
 from services.event_service import (
     flush_events,
@@ -83,7 +83,7 @@ def render_main(
 
     # DAY5_STORY_CINEMATIC_V2_MAIN_GATE
     # 최초 Story Cinematic은 Learning Story 제목/탭/로그아웃보다 먼저 전용 화면을 소유한다.
-    chapter = get_chapter(
+    chapter = get_runtime_chapter(
         world_id=world[0],
         chapter_number=world[7],
     )
@@ -111,33 +111,35 @@ def render_main(
         identity=pack["identity"],
     )
 
-    learn_tab, world_tab, record_tab = (
-        st.tabs(
-            [
-                "학습",
-                pack[
-                    "archive_name"
-                ],
-                pack[
-                    "report_name"
-                ],
-            ]
-        )
+    # V3_LAZY_MAIN_SECTION_ROUTING_V1_20260908
+    # st.tabs는 비활성 탭의 body도 같은 rerun에서 실행하므로
+    # 학습 중 Archive/Record DB 조회까지 매번 발생한다.
+    # V3에서는 선택된 section 하나만 렌더해 play 경로의 불필요한 조회를 차단한다.
+    section_options = [
+        "학습",
+        pack["archive_name"],
+        pack["report_name"],
+    ]
+
+    active_section = st.radio(
+        "메인 화면",
+        options=section_options,
+        horizontal=True,
+        key=f"v3_main_section_{world[0]}",
+        label_visibility="collapsed",
     )
 
-    with learn_tab:
+    if active_section == section_options[0]:
         render_learning_tab(
             user=user,
             world=world,
         )
-
-    with world_tab:
+    elif active_section == section_options[1]:
         render_world_tab(
             user=user,
             world=world,
         )
-
-    with record_tab:
+    else:
         render_record_tab(
             user=user,
             world=world,
