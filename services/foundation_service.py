@@ -22,6 +22,7 @@ from services.experience_profile_service import (
     build_story_pedagogy_rules,
     get_theme_experience_profile,
 )
+from services.story_context_service import invalidate_runtime_story_context_all
 
 
 CURRICULUM_PROMPT_VERSION = "curriculum_v4_semantic_contract"
@@ -351,6 +352,7 @@ JSON만 반환한다.
         title=blueprint["title"],
         target_chapter_count=blueprint["target_chapter_count"],
     )
+    invalidate_runtime_story_context_all()
     return blueprint
 
 

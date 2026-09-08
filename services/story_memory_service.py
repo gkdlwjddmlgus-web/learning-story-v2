@@ -4,6 +4,7 @@ from repositories.story_state_repository import (
     ensure_story_state,
     update_story_state,
 )
+from services.story_context_service import invalidate_runtime_story_context_all
 
 
 def _dedupe(
@@ -133,6 +134,7 @@ def initialize_companion_state(
             companion_state
         ),
     )
+    invalidate_runtime_story_context_all()
 
 
 def apply_state_update(
@@ -279,3 +281,4 @@ def apply_state_update(
         ),
         latest_event=latest_event,
     )
+    invalidate_runtime_story_context_all()

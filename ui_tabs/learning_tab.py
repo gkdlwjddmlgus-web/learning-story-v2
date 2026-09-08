@@ -106,6 +106,7 @@ from services.question_service import (
     generate_chapter_questions,
 )
 from services.story_context_service import (
+    get_runtime_story_context,
     get_story_context,
 )
 from services.chapter_runtime_service import (
@@ -968,7 +969,7 @@ def _render_chapter_story(
         world[4]
     )
 
-    context = get_story_context(
+    context = get_runtime_story_context(
         world[0]
     )
 
@@ -1303,7 +1304,7 @@ def _render_story_choice(
     if not choices:
         return True
 
-    context = get_story_context(
+    context = get_runtime_story_context(
         world[0]
     )
 
@@ -1998,7 +1999,7 @@ def render_quiz(
         index=index,
     )
 
-    context = get_story_context(
+    context = get_runtime_story_context(
         world[0]
     )
 

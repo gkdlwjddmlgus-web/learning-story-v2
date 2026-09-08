@@ -34,6 +34,7 @@ from services.story_service import (
     get_story_block_start_chapter,
     get_story_phase,
 )
+from services.story_context_service import invalidate_runtime_story_context_all
 
 
 def get_story_runtime(world_id: int) -> dict | None:
@@ -81,6 +82,7 @@ def _prepare_context(
                     "summary": f"Chapter {previous[2]}까지 진행됨"
                 },
             )
+            invalidate_runtime_story_context_all()
             state = get_story_context(world[0])["state"]
 
     recent, global_profile = _profiles_or_empty(personalization)
@@ -387,6 +389,7 @@ def ensure_story_chapter(
             )
         ),
     )
+    invalidate_runtime_story_context_all()
     return chapter_id
 
 
@@ -482,6 +485,7 @@ def apply_completed_chapter_state(*, world_id: int, chapter) -> None:
             story_arc_id=context["arc"]["id"],
             current_phase=phase,
         )
+        invalidate_runtime_story_context_all()
 
 
 def get_target_chapter_count(world_id: int) -> int | None:
@@ -503,3 +507,4 @@ def complete_current_story_arc(world_id: int) -> None:
     arc = get_active_story_arc(world_id)
     if arc:
         complete_story_arc(arc["id"])
+        invalidate_runtime_story_context_all()
