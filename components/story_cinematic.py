@@ -783,15 +783,41 @@ def _render_manual_cinematic(
         st.rerun()
 
 
-def render_story_review(*, story_text: str) -> None:
+# V3_STORY_REVIEW_CONTRAST_FIX_V1_20260908
+def _story_review_expander_contrast_css() -> str:
+    return r"""
+    <style>
+    [data-testid="stExpander"]
+    details:has(.story-review-card) > summary:hover,
+    [data-testid="stExpander"]
+    details:has(.story-review-card) > summary:focus,
+    [data-testid="stExpander"]
+    details:has(.story-review-card) > summary:focus-visible,
+    [data-testid="stExpander"]
+    details:has(.story-review-card)[open] > summary {
+        background: transparent !important;
+    }
+    </style>
+    """
+
+
+def render_story_review(
+    *,
+    story_text: str,
+    expanded: bool = False,
+) -> None:
     paragraphs = _split_story_paragraphs(story_text)
 
-    with st.expander("📖 스토리 다시보기", expanded=False):
+    with st.expander(
+        "📖 스토리 다시보기",
+        expanded=expanded,
+    ):
         # Readability CSS는 expander 내부에서 주입한다.
         # expander 앞에 별도 st.markdown element container가 생기면
         # 같은 row의 오른쪽 expander보다 Story Review가 아래로 밀릴 수 있다.
         st.markdown(
-            generated_text_readability_css(),
+            generated_text_readability_css()
+            + _story_review_expander_contrast_css(),
             unsafe_allow_html=True,
         )
 
@@ -814,6 +840,7 @@ def render_story_experience(
     story_text: str,
     chapter_number: int | None = None,
     chapter_title: str | None = None,
+    review_expanded: bool = False,
 ) -> bool:
     """
     True: Dedicated Cinematic Scene Page가 현재 화면을 독점 중.
@@ -823,13 +850,19 @@ def render_story_experience(
     """
     seen_key = get_story_cinematic_seen_key(chapter_id)
     if st.session_state.get(seen_key):
-        render_story_review(story_text=story_text)
+        render_story_review(
+            story_text=story_text,
+            expanded=review_expanded,
+        )
         return False
 
     sentences = _split_story_sentences(story_text)
     if not sentences:
         _mark_seen(chapter_id)
-        render_story_review(story_text=story_text)
+        render_story_review(
+            story_text=story_text,
+            expanded=review_expanded,
+        )
         return False
 
     _inject_css(theme)

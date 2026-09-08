@@ -30,6 +30,9 @@ from components.generated_text_readability import generated_text_readability_css
 from components.learning_compact_ui import (
     render_compact_chapter_header,
 )
+from components.play_action_hub import (
+    render_play_action_hub,
+)
 from components.investigation_board import (
     ACTION_CLUE,
     ACTION_COMPANION,
@@ -959,6 +962,7 @@ def _render_chapter_story(
     user,
     world,
     chapter,
+    review_expanded: bool = False,
 ) -> bool:
     pack = get_theme_pack(
         world[4]
@@ -1115,6 +1119,7 @@ def _render_chapter_story(
             story_text=chapter[4],
             chapter_number=chapter[2],
             chapter_title=format_inline_text(chapter[3]),
+            review_expanded=review_expanded,
         )
         # Marker는 기존 compact/mobile CSS selector 호환을 위해 유지하되,
         # expander 앞에 별도 Streamlit element gap을 만들지 않도록 뒤로 이동한다.
@@ -2394,6 +2399,94 @@ def render_quiz(
         st.rerun()
 
 
+# V3_ACTION_HUB_V1_20260908
+def _render_companion_play_mode(
+    *,
+    user,
+    world,
+    chapter,
+) -> None:
+    """Reuse current-question learning support without generation work."""
+    guide_name = (
+        world[9]
+        if len(world) > 9
+        and world[9]
+        else "고양이"
+    )
+
+    if chapter[7]:
+        st.info(
+            "이 Chapter는 이미 완료되었습니다. "
+            "스토리를 다시 보거나 다음 학습으로 이어갈 수 있습니다."
+        )
+        return
+
+    questions = (
+        chapter[6]
+        or []
+    )
+    if not questions:
+        st.info(
+            f"{guide_name}의 문제별 학습 도움은 "
+            "문제가 준비된 뒤 확인할 수 있습니다."
+        )
+        st.caption(
+            "문제 풀기에서 기존 문제 준비 흐름을 이용하세요. "
+            "이 화면 전환만으로는 Gemini를 호출하지 않습니다."
+        )
+        return
+
+    # 기존 Quiz progress restore를 그대로 재사용한다.
+    # 같은 Chapter에서 한 번 초기화되면 session_state guard로 재조회하지 않는다.
+    _initialize_quiz_progress_from_db(
+        user=user,
+        world=world,
+        chapter=chapter,
+        questions=questions,
+    )
+
+    index = int(
+        st.session_state.get(
+            "question_index",
+            0,
+        )
+    )
+    if index >= len(questions):
+        st.info(
+            "현재 Chapter의 모든 문제에 응답했습니다. "
+            "문제 풀기 화면에서 완료 흐름을 이어가세요."
+        )
+        return
+
+    question = questions[index]
+    experience_profile = get_theme_experience_profile(
+        world[4]
+    )
+    st.markdown(
+        f"### 🐈 {format_inline_text(guide_name)}와 함께 보기"
+    )
+    st.caption(
+        f"{experience_profile['step_noun']} {index + 1} / {len(questions)} · "
+        "현재 문제의 단서와 개념 도움만 확인합니다."
+    )
+
+    _render_fixed_question_evidence(
+        theme=world[4],
+        question=question,
+    )
+    _render_learning_materials(
+        theme=world[4],
+        learner_level=world[3],
+        difficulty=(
+            question.get("difficulty")
+            or "basic"
+        ),
+        question=question,
+        guide_name=guide_name,
+        section=ACTION_COMPANION,
+    )
+
+
 def render_learning_tab(
     user,
     world,
@@ -2498,13 +2591,46 @@ def render_learning_tab(
     if is_ai_mock_enabled():
         st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
 
+    # V3_ACTION_HUB_V1_20260908
+    # Hub click은 play_mode session state만 바꾸며 DB/Gemini 작업을 직접 수행하지 않는다.
+    guide_name = (
+        world[9]
+        if len(world) > 9
+        and world[9]
+        else "고양이"
+    )
+    render_play_action_hub(
+        world_id=world[0],
+        chapter_id=chapter[0],
+        active_mode=play_mode,
+        guide_name=guide_name,
+    )
+
     cinematic_active = _render_chapter_story(
         user=user,
         world=world,
         chapter=chapter,
+        review_expanded=(
+            play_mode
+            == PLAY_MODE_REVIEW
+        ),
     )
 
     if cinematic_active:
+        return
+
+    if play_mode == PLAY_MODE_REVIEW:
+        return
+
+    if play_mode == PLAY_MODE_COMPANION:
+        _render_companion_play_mode(
+            user=user,
+            world=world,
+            chapter=chapter,
+        )
+        return
+
+    if play_mode != PLAY_MODE_QUIZ:
         return
 
     questions = (
