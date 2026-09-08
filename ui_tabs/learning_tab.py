@@ -110,6 +110,13 @@ from services.chapter_runtime_service import (
     invalidate_runtime_chapter,
     invalidate_runtime_world,
 )
+from services.play_runtime_service import (
+    PLAY_MODE_COMPANION,
+    PLAY_MODE_QUIZ,
+    PLAY_MODE_REVIEW,
+    PLAY_MODE_STORY,
+    resolve_play_mode,
+)
 from services.story_engine_service import (
     apply_completed_chapter_state,
     complete_current_story_arc,
@@ -2458,8 +2465,11 @@ def render_learning_tab(
 
         return
 
-    # Dedicated Story presentation 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
-    if (
+    # V3_PLAY_MODE_STATE_CORE_V1_20260908
+    # Story의 최초 재생 여부를 play_mode state machine의 강제 진입 조건으로 사용한다.
+    # 아직 Action Hub를 노출하지 않으므로 review/companion은 상태 계약만 예약하고
+    # 기존 visible UI는 story -> quiz 흐름을 그대로 유지한다.
+    story_pending = (
         should_render_dialogue_story(
             chapter_id=chapter[0],
             story_text=chapter[4],
@@ -2468,7 +2478,16 @@ def render_learning_tab(
             chapter_id=chapter[0],
             story_text=chapter[4],
         )
-    ):
+    )
+
+    play_mode = resolve_play_mode(
+        world_id=world[0],
+        chapter_id=chapter[0],
+        story_pending=story_pending,
+    )
+
+    # Dedicated Story presentation 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
+    if play_mode == PLAY_MODE_STORY:
         _render_chapter_story(
             user=user,
             world=world,
