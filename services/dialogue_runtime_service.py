@@ -10,6 +10,7 @@ from services.dev_config import is_dialogue_runtime_enabled
 
 
 # DAY6_DIALOGUE_RUNTIME_SERVICE_V2
+# STORY_SCENE_NAVIGATION_SPEAKER_INTEGRITY_V1_2_20260908
 # DIALOGUE_SPEAKER_PORTRAIT_INTEGRITY_V1_20260904\n# DIALOGUE_SAME_PARAGRAPH_COMPANION_ACTION_V1_1_20260906
 
 _QUOTE_PATTERN = re.compile(
@@ -20,10 +21,6 @@ _SPEECH_VERB_PATTERN = re.compile(
     r"(말했|말하|대답|물었|외쳤|중얼|속삭|소리쳤|되물었|"
     r"답했|덧붙였|말했다|물었다|대답했다|외쳤다|"
     r"중얼거렸|속삭였|소리쳤다)"
-)
-
-_PLAYER_HINT_PATTERN = re.compile(
-    r"(당신|사용자|나는|내가|우리는|우리가|주인공)"
 )
 
 _NPC_SPEAKER_PATTERN = re.compile(
@@ -358,18 +355,20 @@ def _speaker_from_quote_context(
     previous_paragraph_text: str = "",
 ) -> tuple[str, str]:
     """
-    따옴표 대사의 화자를 판정한다.
+    Chapter Story의 따옴표 대사 화자를 판정한다.
 
     우선순위:
-    1. 같은 문단의 명시적 Player 발화 표지 -> Player
-    2. 같은 문단의 이름 + 발화 동사 -> Companion/NPC
-    3. 같은 문단에 Companion 이름 + 발화 동사 -> Companion
-    4. 문단 시작 따옴표이고 직전 문단 마지막 문장이 Companion 중심 행동이면 -> Companion
-    5. 불명확 -> Narrator
+    1. 같은 문단의 이름 + 발화 동사 -> Companion/NPC
+    2. 같은 문단에 Companion 이름 + 행동/발화 맥락 -> Companion
+    3. 문단 시작 따옴표이고 직전 문단 마지막 문장이 Companion 중심 행동이면 -> Companion
+    4. 불명확 -> Narrator
 
-    Agency Gate 정합성:
-    - 단순히 '루루, ...'라고 시작한다는 이유만으로 Player 대사로 추정하지 않는다.
-    - Player는 명시적 발화 attribution이 있을 때만 legacy 호환으로 분류한다.
+    Player Agency Gate 정합성:
+    - 생성 Chapter Story에서는 Player 직접 발화를 Runtime이 추론하지 않는다.
+    - Player 발화는 Story Choice / Question 등 사용자가 실제로 선택한 UI 결과에서만
+      별도 interaction component가 렌더링한다.
+    - legacy Story에 1인칭 attribution이 남아 있어도 Player portrait를 만들지 않고
+      Narrator fallback으로 둔다.
     """
     previous = _clean_text(previous_text)[-_CONTEXT_CHARS:]
     following = _clean_text(next_text)[:_CONTEXT_CHARS]
@@ -377,12 +376,6 @@ def _speaker_from_quote_context(
         f"{previous} {following}"
     )
     guide = _clean_text(guide_name)
-
-    if (
-        _PLAYER_HINT_PATTERN.search(context)
-        and _SPEECH_VERB_PATTERN.search(context)
-    ):
-        return "player", "나"
 
     match = _NPC_SPEAKER_PATTERN.search(
         context
@@ -398,6 +391,16 @@ def _speaker_from_quote_context(
         ).strip()
 
         if speaker:
+            if speaker in {
+                "나",
+                "내",
+                "우리",
+                "사용자",
+                "당신",
+                "주인공",
+            }:
+                return "narrator", "NARRATOR"
+
             if (
                 guide
                 and (

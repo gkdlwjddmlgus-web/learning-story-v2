@@ -3,8 +3,10 @@ from __future__ import annotations
 # CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
 
 # QUESTION_DIFFICULTY_COMPANION_VOICE_QUALITY_GATE_V1_20260906
+# QUESTION_EVIDENCE_INDEPENDENCE_DIFFICULTY_V1_20260908
 import random
 
+from difflib import SequenceMatcher
 import json
 import re
 
@@ -22,7 +24,7 @@ from services.character_voice_service import build_companion_voice_rules
 
 
 QUESTION_COUNT = 5
-PROMPT_VERSION = "question_curriculum_v15_semantic_contract"
+PROMPT_VERSION = "question_curriculum_v16_evidence_independence"
 # QUESTION_ANSWER_INTEGRITY_GATE_V1_20260904
 # DAY6_CHARACTER_VOICE_STORY_DIALOGUE_PROMPT_V1
 # DAY6_QUIZ_CHOICE_RANDOMIZER_V1
@@ -239,7 +241,8 @@ REASONING_RULES = {
     "intermediate": """
 - 원인, 적절한 조치, 흐름, 관측 결과를 연결해 분석하게 한다.
 - 5개 중 최소 3개는 적용/진단형으로 만든다.
-- 각 문제는 가능하면 독립된 Evidence 조건 2개 이상을 함께 읽고 판단하게 한다.
+- 각 문제는 반드시 서로 다른 Evidence 사실/조건 2개 이상을 결합해야 정답이 확정되게 한다.
+- concept_brief 한 문장 또는 Evidence 한 문장만 읽고 정답을 바로 고를 수 있다면 중급 문제가 아니다. 자료/질문/보기를 다시 설계한다.
 - 한눈에 보이는 극단값 하나를 찾는 데서 끝내지 말고, 왜 이상한지와 그 값을 어떻게 다룰지까지 구분하게 한다.
 - 평균/중앙값/보간/제외/원본 재확인처럼 실제로 경쟁 가능한 방법 사이의 trade-off를 고르게 한다.
 - 오답도 현실적으로 선택할 수 있는 방법이어야 하며, '모두 삭제/무조건 0/그대로 방치/임의의 극단값 대체' 같은 즉시 탈락 보기를 중급 문제의 주된 난이도 장치로 쓰지 않는다.
@@ -306,6 +309,141 @@ def _has_direct_answer_leak(
         return False
 
     return answer_key in evidence_key
+
+
+def _support_segments(value: object) -> list[str]:
+    """
+    concept_brief / Evidence 안에서 정답과 지나치게 비슷한 한 문장을 찾기 위한
+    보수적 문장·로그 조각 분리.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+
+    parts = re.split(
+        r"[\r\n]+|(?<=[.!?。！？])\s+|[;；]|(?:\s+-\s+)",
+        raw,
+    )
+    cleaned = [_normalize_text(part) for part in parts]
+    return [part for part in cleaned if len(_compact_match_text(part)) >= 4]
+
+
+def _answer_support_similarity(
+    answer: object,
+    support: object,
+) -> float:
+    """
+    정답 보기와 support 문장의 표면 재진술 정도를 0~1로 계산한다.
+
+    의미 유사도 모델을 호출하지 않는다. 공백/구두점을 제거한 문자열에 대해
+    SequenceMatcher ratio와 최장 연속 일치의 정답 대비 비율 중 큰 값을 사용한다.
+    """
+    answer_key = _compact_match_text(answer)
+    support_key = _compact_match_text(support)
+
+    if len(answer_key) < 6 or len(support_key) < 4:
+        return 0.0
+
+    matcher = SequenceMatcher(
+        None,
+        answer_key,
+        support_key,
+        autojunk=False,
+    )
+    ratio = matcher.ratio()
+    longest = matcher.find_longest_match(
+        0,
+        len(answer_key),
+        0,
+        len(support_key),
+    ).size
+    answer_coverage = longest / len(answer_key)
+    return max(ratio, answer_coverage)
+
+
+def _max_answer_support_similarity(
+    answer: object,
+    support: object,
+) -> tuple[float, str]:
+    best_score = 0.0
+    best_segment = ""
+
+    for segment in _support_segments(support):
+        score = _answer_support_similarity(answer, segment)
+        if score > best_score:
+            best_score = score
+            best_segment = segment
+
+    return best_score, best_segment
+
+
+def _validate_evidence_independence_quality(
+    *,
+    question: str,
+    concept_brief: str,
+    evidence_summary: str,
+    evidence_context: str,
+    correct_choice: str,
+    requested_difficulty: str,
+    answer_kind: str,
+    index: int,
+) -> None:
+    """
+    중급/고급에서 concept brief나 Evidence 한 문장이 정답을 거의 재진술해
+    사고 부담을 없애는 회귀를 차단한다.
+
+    - numeric은 별도 Answer Integrity 계산 검증이 있으므로 여기서는 제외한다.
+    - intro/basic은 teach-before-test 지원량이 더 크므로 적용하지 않는다.
+    - 의미 지식이나 분야별 키워드를 하드코딩하지 않는다.
+    """
+    if requested_difficulty not in {"intermediate", "advanced"}:
+        return
+    if answer_kind == "numeric":
+        return
+
+    evidence_segments = []
+    for value in (evidence_summary, evidence_context):
+        evidence_segments.extend(_support_segments(value))
+
+    unique_evidence = {
+        _compact_match_text(segment)
+        for segment in evidence_segments
+        if _compact_match_text(segment)
+    }
+    if len(unique_evidence) < 2:
+        raise QuestionDifficultyQualityError(
+            f"{index}번 중급/고급 문제는 서로 다른 Evidence 사실/조건이 "
+            "2개 미만이라 한 단서만으로 풀릴 가능성이 큽니다."
+        )
+
+    brief_score, brief_segment = _max_answer_support_similarity(
+        correct_choice,
+        concept_brief,
+    )
+    if brief_score >= 0.40:
+        raise QuestionDifficultyQualityError(
+            f"{index}번 문제의 concept_brief가 정답 보기를 너무 가깝게 "
+            f"재진술합니다 (similarity={brief_score:.2f}): "
+            f"{brief_segment}"
+        )
+
+    evidence_score = 0.0
+    evidence_segment = ""
+    for value in (evidence_summary, evidence_context):
+        score, segment = _max_answer_support_similarity(
+            correct_choice,
+            value,
+        )
+        if score > evidence_score:
+            evidence_score = score
+            evidence_segment = segment
+
+    if evidence_score >= 0.35:
+        raise QuestionDifficultyQualityError(
+            f"{index}번 문제의 Evidence 한 조각이 정답 보기를 너무 가깝게 "
+            f"재진술합니다 (similarity={evidence_score:.2f}): "
+            f"{evidence_segment}"
+        )
 
 
 _DEFINITION_RECALL_PATTERNS = (
@@ -850,6 +988,13 @@ def _validate_questions(
             index=index,
         )
 
+        answer_audit = item.get("answer_audit") or {}
+        answer_kind = _normalize_text(
+            answer_audit.get("kind")
+            if isinstance(answer_audit, dict)
+            else ""
+        )
+
         _validate_answer_integrity(
             item=item,
             index=index,
@@ -882,6 +1027,18 @@ def _validate_questions(
             raw_resolved = []
 
         correct_choice = cleaned_choices[correct_index]
+
+        _validate_evidence_independence_quality(
+            question=question,
+            concept_brief=concept_brief,
+            evidence_summary=evidence_summary,
+            evidence_context=evidence_context,
+            correct_choice=correct_choice,
+            requested_difficulty=requested_difficulty,
+            answer_kind=answer_kind,
+            index=index,
+        )
+
         for evidence_name, evidence_value in (
             ("evidence_summary", evidence_summary),
             ("evidence_context", evidence_context),
@@ -1201,7 +1358,11 @@ Concept별 실제 문제 작성 규칙:
 10-1. 질문이 장소/방식/개념/단계/원인 중 하나를 식별하게 한다면, evidence_summary/evidence_context에 정답 보기 전체 문자열이나 정답 보기의 핵심 명칭/약어를 그대로 쓰지 않는다.
 10-2. 정답의 이름 대신 사용자가 그 답을 추론할 수 있는 관찰 특성, 입력/출력, 처리 순서, 시각, 형태, 동작 결과를 제시한다.
 10-3. 예를 들어 정답이 '데이터 웨어하우스'라면 Evidence에 '데이터 웨어하우스'라고 쓰지 말고, '정제·규격화된 데이터를 분석용으로 보관하는 영역'처럼 특징을 보여준다.
-10-4. 문자열 정답명이 없더라도 Evidence가 사실상 '그래서 정답은 이것'이라고 의미상 결론까지 설명하면 실패다. 관찰 사실과 최종 판단 사이에 사용자가 직접 수행할 추론 한 단계를 남긴다.
+10-4. 문자열 정답명이 없어도 Evidence가 사실상 '그래서 정답은 이것'이라고 의미상 결론까지 설명하면 실패다. 관찰 사실과 최종 판단 사이에 사용자가 직접 수행할 추론 한 단계를 남긴다.
+10-5. 중급/고급은 '한 문장 제거 테스트'를 내부적으로 수행한다. concept_brief 또는 Evidence의 한 문장만 남겨도 정답이 확정되면 그 문장은 정답지 역할을 하는 것이므로 자료/질문/보기를 다시 쓴다.
+10-6. 중급/고급은 최소 두 개의 서로 다른 관찰 사실/조건을 결합해야만 정답과 가장 강한 오답을 구분할 수 있게 한다. 한 사실은 정답을 지지하고 다른 사실은 경쟁 오답을 배제하거나 범위를 좁히는 역할을 하게 한다.
+10-7. Evidence에 '보정 규칙/권장 조치/결과 매핑' 같은 규칙형 자료가 필요하더라도, 질문이 바로 그 조치를 묻는다면 규칙 문장이 정답 행동 전체를 그대로 완성하지 않게 한다. 사용자가 현재 상태와 규칙을 함께 적용해야 한다.
+10-8. 특정 물질/명칭/기호를 묻는 문제에서 Evidence가 그 정답 기호·명칭을 그대로 기록했다면 중급 문제가 아니다. 그 경우 이름 맞히기 대신 두 관찰의 관계, 단계, 원인, 결과를 판단하게 바꾼다.
 11. 입문/초급에서는 원본 로그 한 줄만 던지고 알아서 해석하라고 하지 않는다. 다만 쉬운 설명이 정답 자체를 말해서도 안 된다.
 12. 중급/고급에서는 실제형 로그·설정·메트릭을 적극 활용할 수 있다.
 13. Story 설정을 장황하게 다시 쓰지 않는다. 문제에 필요한 자료만 제시한다.
@@ -1290,6 +1451,9 @@ Concept별 실제 문제 작성 규칙:
 - evidence_summary/evidence_context가 문제의 정답 역할이나 분류를 직접 써주고 있지 않은가? 있다면 관찰 사실만 남기고 다시 쓴다.
 - 정답 보기 문자열 또는 정답의 핵심 고유명사/약어가 Evidence에 그대로 등장하지 않는가? 등장한다면 그 명칭을 삭제하고 관찰 특징으로 바꾼다.
 - 문자열 정답명이 없어도 '필터 때문에 제거됨', '오류로 누락됨', '따라서 X다'처럼 질문의 추론을 Evidence가 대신 끝내고 있지 않은가?
+- 중급/고급에서 concept_brief 또는 Evidence의 한 문장만 남겨도 정답이 확정되는가? 그렇다면 한 문장 제거 테스트에 실패한 것이므로 다시 쓴다.
+- 중급/고급에서 서로 다른 관찰 사실/조건 2개 이상을 실제로 결합해야 하는가? 하나가 정답을 지지하고 다른 하나가 경쟁 오답을 배제/좁히는가?
+- 보기의 정답 명칭/기호가 Evidence에 그대로 기록되어 이름만 찾으면 풀리는가? 그렇다면 관계/진단/조치 판단형으로 다시 쓴다.
 - 보기를 만들기 전에 하나의 판단 축을 정했는가? 네 보기가 같은 문장 슬롯과 같은 추상화 수준에서 경쟁하는가?
 - 동급 실재 용어가 4개 없는데 FTP/API 같은 다른 범주를 숫자 채우기로 넣지 않았는가? 그 경우 4개의 흐름/행동/설명 문장으로 바꿨는가?
 - 오답이 Evidence의 현실적인 오독에서 나오나, 아니면 침입/파괴/전면 삭제 같은 터무니없는 사건인가?
@@ -1374,9 +1538,9 @@ Concept별 실제 문제 작성 규칙:
 
     except QuestionDifficultyQualityError as exc:
         raise QuestionGenerationError(
-            "생성된 중급/고급 문제의 보기 중 비교 가치가 낮은 즉시 탈락형 오답이 "
-            "과도하게 포함되어 해당 결과를 폐기했습니다. "
-            "중급 이상에서는 여러 그럴듯한 방법·원인·조치 사이의 비교 판단을 우선합니다. "
+            "생성된 중급/고급 문제의 사고 난이도 검증에 실패해 해당 결과를 폐기했습니다. "
+            "정답을 거의 그대로 말하는 개념 브리핑/증거 한 문장, 단일 단서만으로 풀리는 구성, "
+            "비교 가치가 낮은 즉시 탈락형 오답을 허용하지 않습니다. "
             "자동 재생성은 하지 않았습니다. 문제 준비를 다시 눌러 새로 생성해주세요."
         ) from exc
 

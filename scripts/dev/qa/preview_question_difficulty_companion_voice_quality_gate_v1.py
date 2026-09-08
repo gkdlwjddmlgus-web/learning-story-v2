@@ -32,7 +32,7 @@ def main() -> int:
     print("=" * 78)
 
     intermediate = REASONING_RULES["intermediate"]
-    for token in ("Evidence 조건 2개 이상", "trade-off", "모두 삭제/무조건 0/그대로 방치"):
+    for token in ("Evidence 사실/조건 2개 이상", "trade-off", "모두 삭제/무조건 0/그대로 방치"):
         if token not in intermediate:
             raise AssertionError("intermediate reasoning rule missing: " + token)
     print("[PASS] intermediate reasoning rule strengthened")

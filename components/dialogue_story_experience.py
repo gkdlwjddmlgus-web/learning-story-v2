@@ -21,6 +21,7 @@ from services.dialogue_runtime_service import (
 
 
 # DAY6_DIALOGUE_STORY_EXPERIENCE_V1
+# STORY_SCENE_NAVIGATION_SPEAKER_INTEGRITY_V1_2_20260908
 
 
 def _scene_context(
@@ -417,12 +418,25 @@ def render_dialogue_story_experience(
         unsafe_allow_html=True,
     )
 
-    control_left, control_mid, control_right = st.columns(
-        [1.08, 3.85, 1.45],
+    is_last = current_index == len(beats) - 1
+    next_label = (
+        "이야기를 이어간다"
+        if is_last
+        else "다음 →"
+    )
+
+    (
+        control_skip,
+        control_prev,
+        control_mid,
+        control_next,
+        control_auto,
+    ) = st.columns(
+        [1.12, 0.92, 2.45, 0.92, 1.35],
         vertical_alignment="center",
     )
 
-    with control_left:
+    with control_skip:
         if st.button(
             "건너뛰기 →",
             key=f"dialogue_runtime_v1_skip_{chapter_id}",
@@ -433,31 +447,52 @@ def render_dialogue_story_experience(
             mark_dialogue_story_seen(chapter_id)
             st.rerun()
 
+    with control_prev:
+        if st.button(
+            "← 이전",
+            key=f"dialogue_runtime_v1_prev_{chapter_id}_{current_index}",
+            type="secondary",
+            use_container_width=True,
+            disabled=(current_index <= 0),
+        ):
+            _clear_auto_scene_state(chapter_id)
+            st.session_state[index_key] = max(0, current_index - 1)
+            st.rerun()
+
     with control_mid:
         st.caption(
             f"STORY SCENE · {current_index + 1} / {len(beats)}"
         )
 
-    with control_right:
+    with control_next:
+        if st.button(
+            next_label,
+            key=f"dialogue_runtime_v1_next_{chapter_id}_{current_index}",
+            type="secondary",
+            use_container_width=True,
+        ):
+            _clear_auto_scene_state(chapter_id)
+
+            if is_last:
+                mark_dialogue_story_seen(chapter_id)
+            else:
+                st.session_state[index_key] = current_index + 1
+
+            st.rerun()
+
+    with control_auto:
         auto_enabled = st.toggle(
             "자동 진행",
             value=True,
             key=auto_key,
             help=(
                 "장면 길이에 맞춰 자동으로 다음 Scene으로 넘어갑니다. "
-                "끄면 수동으로 진행할 수 있습니다."
+                "수동 이전/다음 버튼은 자동 진행 중에도 사용할 수 있습니다."
             ),
         )
 
     if not auto_enabled:
         _clear_auto_scene_state(chapter_id)
-
-    is_last = current_index == len(beats) - 1
-    next_label = (
-        "이야기를 이어간다"
-        if is_last
-        else "다음 대화 →"
-    )
 
     # Story runtime에서는 버튼을 scene renderer 밖으로 빼서
     # timer progress를 Scene과 수동 진행 사이에 배치한다.
@@ -492,22 +527,9 @@ def render_dialogue_story_experience(
         auto_enabled=bool(auto_enabled),
     )
 
-    clicked = st.button(
-        next_label,
-        key=f"dialogue_runtime_v1_next_{chapter_id}_{current_index}",
-        type="secondary",
-        use_container_width=True,
-    )
-
-    if clicked:
-        _clear_auto_scene_state(chapter_id)
-
-        if is_last:
-            mark_dialogue_story_seen(chapter_id)
-        else:
-            st.session_state[index_key] = current_index + 1
-
-        st.rerun()
+    # Manual navigation is intentionally kept in the top control row.
+    # The cinematic stage can exceed the viewport height, so placing the only
+    # Next button below the Scene makes manual control appear to disappear.
 
     return True
 

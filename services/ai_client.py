@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# SCHEMA_COMPATIBILITY_FALLBACK_V1_20260908
+# LOCAL_RESPONSE_SCHEMA_VALIDATION_V1_20260908
+# SCHEMA_FALLBACK_PROMPT_CONTRACT_V1_20260908
+
 import json
 import random
 import time
@@ -22,6 +26,26 @@ DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
 class AIQuotaExhausted(RuntimeError):
     pass
+
+
+class AIResponseSchemaValidationError(RuntimeError):
+    """로컬 응답 계약(JSON Schema subset) 검증 실패."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str = "$",
+        keyword: str | None = None,
+    ) -> None:
+        detail = f"{path}: {message}"
+        if keyword:
+            detail += f" [keyword={keyword}]"
+        super().__init__(
+            "Local response schema validation failed: " + detail
+        )
+        self.path = path
+        self.keyword = keyword
 
 
 @st.cache_resource(show_spinner=False)
@@ -161,6 +185,449 @@ def _schema_related(exc: Exception) -> bool:
     )
 
 
+def _should_schema_compatibility_fallback(exc: Exception) -> bool:
+    """
+    Structured-output 요청의 호환성 fallback 후보인지 판별한다.
+
+    Gemini가 response_json_schema 자체를 명시하지 않고
+    `400 INVALID_ARGUMENT`만 반환하는 경우가 있으므로,
+    schema가 실제로 포함된 첫 요청에 한해서 generic 400도
+    같은 key/model/prompt의 schema-less compatibility probe 1회를 허용한다.
+    """
+    if isinstance(exc, AIResponseSchemaValidationError):
+        return False
+
+    if _schema_related(exc):
+        return True
+
+    code = _status_code(exc)
+    if code != 400:
+        return False
+
+    message = str(exc).lower()
+    return (
+        "invalid_argument" in message
+        or "invalid argument" in message
+    )
+
+
+def _json_type_matches(value: Any, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        )
+    if expected == "null":
+        return value is None
+    return False
+
+
+def _schema_path(parent: str, key: Any) -> str:
+    if isinstance(key, int):
+        return f"{parent}[{key}]"
+    key_text = str(key)
+    if key_text.isidentifier():
+        return f"{parent}.{key_text}"
+    return f"{parent}[{key_text!r}]"
+
+
+def _validation_error(
+    message: str,
+    *,
+    path: str,
+    keyword: str,
+) -> AIResponseSchemaValidationError:
+    return AIResponseSchemaValidationError(
+        message,
+        path=path,
+        keyword=keyword,
+    )
+
+
+def _validate_local_json_schema(
+    value: Any,
+    schema: Any,
+    *,
+    path: str = "$",
+) -> None:
+    """
+    Provider structured-output가 실패해 schema-less fallback을 사용할 때도
+    앱 내부 응답 계약을 지키기 위한 로컬 JSON Schema subset validator.
+
+    지원 범위:
+    - type / enum / const
+    - object: required / properties / additionalProperties /
+      minProperties / maxProperties
+    - array: items / minItems / maxItems / uniqueItems
+    - string: minLength / maxLength
+    - number/integer: minimum / maximum /
+      exclusiveMinimum / exclusiveMaximum
+    - allOf / anyOf / oneOf
+
+    description/title/default/format 등 생성 결과의 구조 무결성에 직접
+    영향을 주지 않는 annotation keyword는 무시한다.
+    """
+    if schema is True:
+        return
+    if schema is False:
+        raise _validation_error(
+            "boolean schema is false",
+            path=path,
+            keyword="false_schema",
+        )
+    if not isinstance(schema, dict):
+        raise _validation_error(
+            "schema must be an object or boolean",
+            path=path,
+            keyword="schema",
+        )
+
+    if "allOf" in schema:
+        branches = schema["allOf"]
+        if not isinstance(branches, list):
+            raise _validation_error(
+                "allOf must be an array",
+                path=path,
+                keyword="allOf",
+            )
+        for branch in branches:
+            _validate_local_json_schema(value, branch, path=path)
+
+    if "anyOf" in schema:
+        branches = schema["anyOf"]
+        if not isinstance(branches, list):
+            raise _validation_error(
+                "anyOf must be an array",
+                path=path,
+                keyword="anyOf",
+            )
+        matched = 0
+        for branch in branches:
+            try:
+                _validate_local_json_schema(
+                    value,
+                    branch,
+                    path=path,
+                )
+                matched += 1
+            except AIResponseSchemaValidationError:
+                pass
+        if matched == 0:
+            raise _validation_error(
+                "value does not match any anyOf branch",
+                path=path,
+                keyword="anyOf",
+            )
+
+    if "oneOf" in schema:
+        branches = schema["oneOf"]
+        if not isinstance(branches, list):
+            raise _validation_error(
+                "oneOf must be an array",
+                path=path,
+                keyword="oneOf",
+            )
+        matched = 0
+        for branch in branches:
+            try:
+                _validate_local_json_schema(
+                    value,
+                    branch,
+                    path=path,
+                )
+                matched += 1
+            except AIResponseSchemaValidationError:
+                pass
+        if matched != 1:
+            raise _validation_error(
+                f"value matches {matched} oneOf branches; expected 1",
+                path=path,
+                keyword="oneOf",
+            )
+
+    if "const" in schema and value != schema["const"]:
+        raise _validation_error(
+            f"value {value!r} does not equal const",
+            path=path,
+            keyword="const",
+        )
+
+    if "enum" in schema:
+        options = schema["enum"]
+        if not isinstance(options, list):
+            raise _validation_error(
+                "enum must be an array",
+                path=path,
+                keyword="enum",
+            )
+        if not any(
+            type(value) is type(option) and value == option
+            for option in options
+        ):
+            raise _validation_error(
+                f"value {value!r} is not in enum",
+                path=path,
+                keyword="enum",
+            )
+
+    expected_type = schema.get("type")
+    if expected_type is not None:
+        if isinstance(expected_type, str):
+            expected_types = [expected_type]
+        elif isinstance(expected_type, list):
+            expected_types = expected_type
+        else:
+            raise _validation_error(
+                "type must be a string or array",
+                path=path,
+                keyword="type",
+            )
+
+        if not any(
+            isinstance(item, str)
+            and _json_type_matches(value, item)
+            for item in expected_types
+        ):
+            raise _validation_error(
+                f"expected type {expected_types!r}, "
+                f"got {type(value).__name__}",
+                path=path,
+                keyword="type",
+            )
+
+    if isinstance(value, dict):
+        required = schema.get("required", [])
+        if required is not None:
+            if not isinstance(required, list):
+                raise _validation_error(
+                    "required must be an array",
+                    path=path,
+                    keyword="required",
+                )
+            for key in required:
+                if key not in value:
+                    raise _validation_error(
+                        f"required property {key!r} is missing",
+                        path=path,
+                        keyword="required",
+                    )
+
+        properties = schema.get("properties", {})
+        if properties is None:
+            properties = {}
+        if not isinstance(properties, dict):
+            raise _validation_error(
+                "properties must be an object",
+                path=path,
+                keyword="properties",
+            )
+
+        for key, child_schema in properties.items():
+            if key in value:
+                _validate_local_json_schema(
+                    value[key],
+                    child_schema,
+                    path=_schema_path(path, key),
+                )
+
+        additional = schema.get("additionalProperties", True)
+        known = set(properties)
+        extra_keys = [
+            key for key in value
+            if key not in known
+        ]
+        if additional is False and extra_keys:
+            raise _validation_error(
+                f"unexpected properties: {extra_keys!r}",
+                path=path,
+                keyword="additionalProperties",
+            )
+        if isinstance(additional, dict):
+            for key in extra_keys:
+                _validate_local_json_schema(
+                    value[key],
+                    additional,
+                    path=_schema_path(path, key),
+                )
+
+        min_properties = schema.get("minProperties")
+        if (
+            isinstance(min_properties, int)
+            and len(value) < min_properties
+        ):
+            raise _validation_error(
+                f"object has {len(value)} properties; "
+                f"minimum is {min_properties}",
+                path=path,
+                keyword="minProperties",
+            )
+
+        max_properties = schema.get("maxProperties")
+        if (
+            isinstance(max_properties, int)
+            and len(value) > max_properties
+        ):
+            raise _validation_error(
+                f"object has {len(value)} properties; "
+                f"maximum is {max_properties}",
+                path=path,
+                keyword="maxProperties",
+            )
+
+    if isinstance(value, list):
+        min_items = schema.get("minItems")
+        if isinstance(min_items, int) and len(value) < min_items:
+            raise _validation_error(
+                f"array has {len(value)} items; minimum is {min_items}",
+                path=path,
+                keyword="minItems",
+            )
+
+        max_items = schema.get("maxItems")
+        if isinstance(max_items, int) and len(value) > max_items:
+            raise _validation_error(
+                f"array has {len(value)} items; maximum is {max_items}",
+                path=path,
+                keyword="maxItems",
+            )
+
+        if schema.get("uniqueItems") is True:
+            canonical = [
+                json.dumps(
+                    item,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                for item in value
+            ]
+            if len(canonical) != len(set(canonical)):
+                raise _validation_error(
+                    "array items are not unique",
+                    path=path,
+                    keyword="uniqueItems",
+                )
+
+        items_schema = schema.get("items")
+        if isinstance(items_schema, dict) or isinstance(
+            items_schema,
+            bool,
+        ):
+            for index, item in enumerate(value):
+                _validate_local_json_schema(
+                    item,
+                    items_schema,
+                    path=_schema_path(path, index),
+                )
+
+    if isinstance(value, str):
+        min_length = schema.get("minLength")
+        if isinstance(min_length, int) and len(value) < min_length:
+            raise _validation_error(
+                f"string length {len(value)} is below {min_length}",
+                path=path,
+                keyword="minLength",
+            )
+
+        max_length = schema.get("maxLength")
+        if isinstance(max_length, int) and len(value) > max_length:
+            raise _validation_error(
+                f"string length {len(value)} exceeds {max_length}",
+                path=path,
+                keyword="maxLength",
+            )
+
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    ):
+        minimum = schema.get("minimum")
+        if minimum is not None and value < minimum:
+            raise _validation_error(
+                f"value {value!r} is below minimum {minimum!r}",
+                path=path,
+                keyword="minimum",
+            )
+
+        maximum = schema.get("maximum")
+        if maximum is not None and value > maximum:
+            raise _validation_error(
+                f"value {value!r} exceeds maximum {maximum!r}",
+                path=path,
+                keyword="maximum",
+            )
+
+        exclusive_minimum = schema.get("exclusiveMinimum")
+        if (
+            exclusive_minimum is not None
+            and value <= exclusive_minimum
+        ):
+            raise _validation_error(
+                f"value {value!r} must be > "
+                f"{exclusive_minimum!r}",
+                path=path,
+                keyword="exclusiveMinimum",
+            )
+
+        exclusive_maximum = schema.get("exclusiveMaximum")
+        if (
+            exclusive_maximum is not None
+            and value >= exclusive_maximum
+        ):
+            raise _validation_error(
+                f"value {value!r} must be < "
+                f"{exclusive_maximum!r}",
+                path=path,
+                keyword="exclusiveMaximum",
+            )
+
+
+
+
+def _build_schema_fallback_prompt(
+    prompt: str,
+    schema: dict[str, Any],
+) -> str:
+    """
+    Provider-side structured schema를 사용할 수 없을 때만
+    동일한 응답 계약을 텍스트로 명시한다.
+
+    원래 prompt를 보존하고, caller schema를 compact JSON으로
+    뒤에 추가한다. 반환 결과는 이후 로컬 schema validation을
+    반드시 통과해야 한다.
+    """
+    schema_text = json.dumps(
+        schema,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (
+        prompt.rstrip()
+        + "\n\n"
+        + "[Required JSON Output Contract]\n"
+        + "Provider-side response_json_schema를 사용할 수 없으므로 "
+        + "아래 JSON Schema를 정확히 따른 JSON 객체만 반환한다.\n"
+        + "- 키 이름을 바꾸거나 대체 구조를 만들지 않는다.\n"
+        + "- required 필드를 모두 포함한다.\n"
+        + "- additionalProperties가 false인 object에는 정의되지 않은 "
+        + "키를 추가하지 않는다.\n"
+        + "- 설명/Markdown/code fence를 출력하지 않는다.\n"
+        + "JSON_SCHEMA="
+        + schema_text
+    )
+
+
 def _retry_reason(exc: Exception) -> str:
     code = _status_code(exc)
     error_name = type(exc).__name__
@@ -224,9 +691,12 @@ def generate_live_json(
     retry_reasons: list[str] = []
     last_error: Exception | None = None
     use_schema = True
+    schema_fallback_used = False
     prompt_chars = len(prompt)
 
-    for attempt in range(max_retries + 1):
+    # max_retries는 transient/content retry 예산이다.
+    # structured-schema compatibility fallback 1회는 이 예산과 분리한다.
+    for attempt in range(max_retries + 2):
         attempt_count = attempt + 1
 
         try:
@@ -244,9 +714,15 @@ def generate_live_json(
             if use_schema:
                 kwargs["response_json_schema"] = schema
 
+            request_prompt = (
+                prompt
+                if use_schema
+                else _build_schema_fallback_prompt(prompt, schema)
+            )
+
             response = client.models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=request_prompt,
                 config=types.GenerateContentConfig(**kwargs),
             )
 
@@ -264,6 +740,7 @@ def generate_live_json(
                 )
 
             result = json.loads(text)
+            _validate_local_json_schema(result, schema)
 
             return result, {
                 "retry_count": retry_count,
@@ -303,11 +780,17 @@ def generate_live_json(
                 setattr(wrapped, "_ls_key_slot", key_slot)
                 raise wrapped from exc
 
-            if use_schema and _schema_related(exc):
+            if (
+                use_schema
+                and not schema_fallback_used
+                and _should_schema_compatibility_fallback(exc)
+            ):
                 use_schema = False
+                schema_fallback_used = True
                 retry_count += 1
                 retry_reasons.append(
-                    "schema_fallback:" + _retry_reason(exc)
+                    "schema_compatibility_fallback:"
+                    + _retry_reason(exc)
                 )
                 continue
 
@@ -318,7 +801,13 @@ def generate_live_json(
                 exc,
                 (ValueError, json.JSONDecodeError),
             )
-            if not retryable or attempt >= max_retries:
+            transient_retries_used = (
+                retry_count - int(schema_fallback_used)
+            )
+            if (
+                not retryable
+                or transient_retries_used >= max_retries
+            ):
                 break
 
             retry_count += 1

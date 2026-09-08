@@ -107,7 +107,7 @@ def main() -> int:
 
     question = sources["question"]
     for token in (
-        'PROMPT_VERSION = "question_curriculum_v15_semantic_contract"',
+        'PROMPT_VERSION = "question_curriculum_v16_evidence_independence"',
         "concept_contracts: dict[str, dict[str, str]] | None = None",
         "[Curriculum Semantic Contract]",
         "common_misconception을 정답 논리로 만들지 않는다",

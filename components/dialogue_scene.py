@@ -11,6 +11,7 @@ from components.generated_text_readability import generated_text_readability_css
 
 
 # DAY6_DIALOGUE_SCENE_UI_V1
+# STORY_SCENE_NAVIGATION_SPEAKER_INTEGRITY_V1_2_20260908
 # DAY6_DIALOGUE_SCENE_UI_V1_1_POLISH
 # DAY6_DIALOGUE_SCENE_UI_V1_1_1_PLAYER_TEXT_ALIGN
 # DAY6_DIALOGUE_SCENE_UI_V1_1_2_HIDE_PLAYER_NAME
@@ -574,8 +575,17 @@ def render_dialogue_scene(
         else ""
     )
 
+    if normalized_role == "narrator":
+        scene_kicker = "STORY SCENE"
+    elif normalized_role == "companion":
+        scene_kicker = style["scene_label"]
+    elif normalized_role == "player":
+        scene_kicker = "PLAYER CHOICE"
+    else:
+        scene_kicker = "CHARACTER DIALOGUE"
+
     kicker_html = (
-        f'<div class="dialogue-scene-kicker">{html.escape(style["scene_label"])}</div>'
+        f'<div class="dialogue-scene-kicker">{html.escape(scene_kicker)}</div>'
         if show_scene_chrome
         else ""
     )
