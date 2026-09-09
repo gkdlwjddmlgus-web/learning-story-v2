@@ -50,7 +50,6 @@ def render_main(
         world[4]
     )
 
-    # DAY5_WORLD_INTRO_CINEMATIC_V1_MAIN_GATE
     if (
         len(world) <= 9
         or not world[9]
@@ -81,12 +80,11 @@ def render_main(
         flush=True,
     )
 
-    # DAY5_STORY_CINEMATIC_V2_MAIN_GATE
-    # 최초 Story Cinematic은 Learning Story 제목/탭/로그아웃보다 먼저 전용 화면을 소유한다.
     chapter = get_runtime_chapter(
         world_id=world[0],
         chapter_number=world[7],
     )
+
     if (
         chapter is not None
         and should_render_story_cinematic(
@@ -104,36 +102,54 @@ def render_main(
         world[4]
     )
 
-    # DAY5_COMPACT_LEARNING_UI_V1_MAIN
-    render_compact_app_header(
-        theme=world[4],
-        user_name=f"{user['display_name']}님",
-        identity=pack["identity"],
-    )
-
-    # V3_LAZY_MAIN_SECTION_ROUTING_V1_20260908
-    # st.tabs는 비활성 탭의 body도 같은 rerun에서 실행하므로
-    # 학습 중 Archive/Record DB 조회까지 매번 발생한다.
-    # V3에서는 선택된 section 하나만 렌더해 play 경로의 불필요한 조회를 차단한다.
     section_options = [
         "학습",
         pack["archive_name"],
         pack["report_name"],
     ]
-
-    active_section = st.radio(
-        "메인 화면",
-        options=section_options,
-        horizontal=True,
-        key=f"v3_main_section_{world[0]}",
-        label_visibility="collapsed",
+    section_key = (
+        f"v3_main_section_{world[0]}"
     )
 
+    active_section = st.session_state.get(
+        section_key,
+        section_options[0],
+    )
+    if active_section not in section_options:
+        active_section = section_options[0]
+        st.session_state[
+            section_key
+        ] = active_section
+
+    # V3_FULL_EXPECTED_PLAY_UI_V1_20260908
+    # Learning owns the full viewport. Its small navigation controls live
+    # inside the play HUD, so the old app header/radio do not consume height.
     if active_section == section_options[0]:
         render_learning_tab(
             user=user,
             world=world,
         )
+        return
+
+    # Archive / Record retain the conventional Streamlit document layout.
+    render_compact_app_header(
+        theme=world[4],
+        user_name=(
+            f"{user['display_name']}님"
+        ),
+        identity=pack["identity"],
+    )
+
+    active_section = st.radio(
+        "메인 화면",
+        options=section_options,
+        horizontal=True,
+        key=section_key,
+        label_visibility="collapsed",
+    )
+
+    if active_section == section_options[0]:
+        st.rerun()
     elif active_section == section_options[1]:
         render_world_tab(
             user=user,

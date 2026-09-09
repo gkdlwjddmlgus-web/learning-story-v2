@@ -16,6 +16,7 @@ from components.generated_text_readability import generated_text_readability_css
 # DAY6_DIALOGUE_SCENE_UI_V1_1_1_PLAYER_TEXT_ALIGN
 # DAY6_DIALOGUE_SCENE_UI_V1_1_2_HIDE_PLAYER_NAME
 # DAY6_GENERATED_TEXT_READABILITY_V1_1
+# V3_STORY_AGENCY_STAGE_V1_20260908
 _SPEAKER_TYPES = {
     "companion",
     "player",
@@ -154,56 +155,42 @@ def _css(theme: str) -> str:
     return f"""
     <style>
     @keyframes dialogueSceneFadeIn {{
-        from {{
-            opacity:0;
-        }}
-        to {{
-            opacity:1;
-        }}
+        from {{ opacity:0; transform:translateY(5px); }}
+        to {{ opacity:1; transform:translateY(0); }}
     }}
 
     @keyframes dialogueSceneKenBurns {{
-        from {{
-            transform:scale(1.00);
-        }}
-        to {{
-            transform:scale(1.025);
-        }}
+        from {{ transform:scale(1.00); }}
+        to {{ transform:scale(1.022); }}
     }}
 
     @keyframes dialoguePortraitEnter {{
-        from {{
-            opacity:0;
-            transform:translateY(8px) scale(.985);
-        }}
-        to {{
-            opacity:1;
-            transform:translateY(0) scale(1);
-        }}
+        /*
+        V3_STORY_VISUAL_CONTRACT_FIX_V3_1_20260908
+        Opacity is deliberately NOT animated here.
+        animation-fill-mode both previously kept the portrait at full opacity,
+        overriding the narrator dim state after the enter animation finished.
+        */
+        from {{ transform:translateY(14px) scale(.98); }}
+        to {{ transform:translateY(0) scale(1); }}
     }}
 
     .dialogue-scene-stage {{
         --dlg-accent:{style["accent"]};
-        --dlg-text:{style["text"]};
-        --dlg-muted:{style["muted"]};
-        --dlg-box:{style["box_bg"]};
-        --dlg-border:{style["box_border"]};
-        --dlg-portrait:{style["portrait_bg"]};
         --dlg-font:{style["font"]};
         --dlg-speaker-font:{style["speaker_font"]};
 
         position:relative;
         isolation:isolate;
-        width:min(100%, 1120px);
-        min-height:clamp(500px,65vh,690px);
-        margin:.5rem auto 0;
+        width:min(100%, 1360px);
+        height:clamp(500px,67dvh,700px);
+        margin:.2rem auto 0;
         overflow:hidden;
-        border-radius:24px;
-        border:1px solid var(--dlg-border);
+        border-radius:22px;
+        border:1px solid rgba(255,255,255,.14);
         background:{style["stage_bg"]};
-        background-size:34px 34px,34px 34px,auto,auto,auto;
-        box-shadow:0 28px 80px rgba(0,0,0,.14);
-        animation:dialogueSceneFadeIn .42s ease-out both;
+        box-shadow:0 28px 80px rgba(0,0,0,.18);
+        animation:dialogueSceneFadeIn .34s ease-out both;
     }}
 
     .dialogue-scene-background {{
@@ -213,9 +200,8 @@ def _css(theme: str) -> str:
         background-size:cover;
         background-position:center;
         background-repeat:no-repeat;
-        transform-origin:center center;
+        transform-origin:center;
         animation:dialogueSceneKenBurns 14s ease-out both;
-        will-change:transform;
     }}
 
     .dialogue-scene-stage::before {{
@@ -224,279 +210,159 @@ def _css(theme: str) -> str:
         z-index:1;
         inset:0;
         pointer-events:none;
-        background:
-            linear-gradient(
-                to bottom,
-                rgba(10,8,6,.30) 0%,
-                rgba(10,8,6,.10) 18%,
-                rgba(10,8,6,0) 42%,
-                rgba(10,8,6,.02) 56%,
-                rgba(10,8,6,.18) 100%
-            );
+        background:linear-gradient(to bottom,rgba(4,9,16,.34),rgba(4,9,16,.06) 45%,rgba(4,9,16,.42));
     }}
 
     .dialogue-scene-stage::after {{
         content:"";
         position:absolute;
-        z-index:1;
-        inset:auto 0 0 0;
+        z-index:2;
+        inset:auto 0 0;
         height:42%;
         pointer-events:none;
-        background:
-            linear-gradient(
-                to top,
-                rgba(0,0,0,.18) 0%,
-                rgba(0,0,0,.07) 42%,
-                transparent 100%
-            );
+        background:linear-gradient(to top,rgba(3,8,15,.72),rgba(3,8,15,.16) 60%,transparent);
     }}
 
     .dialogue-scene-kicker,
     .dialogue-scene-context {{
         position:absolute;
-        z-index:4;
-        top:clamp(.95rem,2.1vw,1.55rem);
-        padding:.34rem .56rem;
-        border:1px solid rgba(255,255,255,.12);
+        z-index:7;
+        top:.9rem;
+        padding:.3rem .56rem;
+        border:1px solid rgba(255,255,255,.15);
         border-radius:999px;
-        background:rgba(16,14,12,.42);
-        backdrop-filter:blur(7px);
-        -webkit-backdrop-filter:blur(7px);
-        box-shadow:0 6px 18px rgba(0,0,0,.14);
-        text-shadow:0 1px 3px rgba(0,0,0,.65);
+        background:rgba(8,16,27,.58);
+        color:#f7f7f4;
+        backdrop-filter:blur(9px);
+        -webkit-backdrop-filter:blur(9px);
+        box-shadow:0 8px 22px rgba(0,0,0,.18);
+        text-shadow:0 1px 3px rgba(0,0,0,.7);
     }}
 
-    .dialogue-scene-kicker {{
-        left:clamp(1rem,2.4vw,2rem);
-        color:#fff7ed;
-        font-family:var(--dlg-speaker-font);
-        font-size:.72rem;
-        font-weight:800;
-        letter-spacing:.16em;
-        text-transform:uppercase;
+    .dialogue-scene-kicker {{ left:.9rem; font-family:var(--dlg-speaker-font); font-size:.66rem; font-weight:850; letter-spacing:.13em; }}
+    .dialogue-scene-context {{ right:.9rem; max-width:58%; font-size:.66rem; line-height:1.35; text-align:right; }}
+
+    .dialogue-scene-character {{
+        position:absolute;
+        z-index:5;
+        left:clamp(1.2rem,5vw,5.5rem);
+        bottom:108px;
+        width:clamp(140px,18vw,250px);
+        height:clamp(185px,30vh,320px);
+        display:flex;
+        align-items:flex-end;
+        justify-content:center;
+        pointer-events:none;
+        filter:drop-shadow(0 16px 24px rgba(0,0,0,.38));
+        animation:dialoguePortraitEnter .38s cubic-bezier(.2,.8,.2,1) both;
+        opacity:1;
+        transition:opacity .22s ease, filter .22s ease;
     }}
 
-    .dialogue-scene-kicker::before {{
-        content:"";
-        display:inline-block;
-        width:.42rem;
-        height:.42rem;
-        margin-right:.42rem;
+    .dialogue-scene-character.companion.is-dim {{
+        /*
+        Dim the visual child instead of the animated positioning layer.
+        This survives both CSS animation fill modes and Streamlit rerenders.
+        */
+        opacity:1;
+        filter:drop-shadow(0 10px 18px rgba(0,0,0,.22));
+    }}
+
+    .dialogue-scene-character.companion.is-dim > img,
+    .dialogue-scene-character.companion.is-dim
+    > .dialogue-scene-character-fallback {{
+        opacity:.26 !important;
+        filter:saturate(.58) brightness(.72) !important;
+    }}
+
+    .dialogue-scene-character.companion.is-active {{
+        opacity:1;
+    }}
+
+    .dialogue-scene-character.companion.is-active > img,
+    .dialogue-scene-character.companion.is-active
+    > .dialogue-scene-character-fallback {{
+        opacity:1 !important;
+        filter:none !important;
+    }}
+
+    .dialogue-scene-character.player {{
+        left:auto;
+        right:clamp(1.2rem,5vw,5.5rem);
+        opacity:1;
+    }}
+
+    .dialogue-scene-character.npc {{
+        left:auto;
+        right:clamp(1.2rem,5vw,5.5rem);
+        opacity:1;
+    }}
+
+    .dialogue-scene-character img {{
+        width:100%;
+        height:100%;
+        object-fit:contain;
+        object-position:center bottom;
+        display:block;
+        opacity:1;
+        transition:opacity .22s ease,filter .22s ease;
+    }}
+    .dialogue-scene-character-fallback {{
+        width:140px;
+        height:140px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
         border-radius:999px;
-        background:var(--dlg-accent);
-        box-shadow:0 0 12px color-mix(in srgb, var(--dlg-accent) 75%, transparent);
-        vertical-align:.02rem;
-    }}
-
-    .dialogue-scene-context {{
-        right:clamp(1rem,2.4vw,2rem);
-        max-width:54%;
-        color:#fffaf3;
-        font-size:.72rem;
-        line-height:1.4;
-        text-align:right;
-        opacity:.96;
+        border:1px solid rgba(255,255,255,.18);
+        background:rgba(8,16,27,.58);
+        color:white;
+        font-size:3.7rem;
+        backdrop-filter:blur(9px);
+        opacity:1;
+        transition:opacity .22s ease,filter .22s ease;
     }}
 
     .dialogue-box {{
         position:absolute;
-        z-index:5;
-        left:clamp(.85rem,2.15vw,1.55rem);
-        right:clamp(.85rem,2.15vw,1.55rem);
-        bottom:clamp(.7rem,1.8vw,1.15rem);
-        min-height:172px;
+        z-index:6;
+        left:clamp(.8rem,2.2vw,1.8rem);
+        right:clamp(.8rem,2.2vw,1.8rem);
+        bottom:clamp(.55rem,1.2vw,.9rem);
+        min-height:100px;
         box-sizing:border-box;
-        display:grid;
-        grid-template-columns:minmax(145px,21%) 1fr;
-        gap:clamp(.85rem,2vw,1.55rem);
-        align-items:stretch;
-        padding:clamp(.9rem,2vw,1.3rem);
-        border:1px solid var(--dlg-border);
-        border-radius:19px;
-        background:var(--dlg-box);
-        backdrop-filter:blur(12px) saturate(1.02);
-        -webkit-backdrop-filter:blur(12px) saturate(1.02);
-        box-shadow:
-            0 18px 46px rgba(0,0,0,.18),
-            inset 0 1px 0 rgba(255,255,255,.06);
-    }}
-
-    .dialogue-box.dialogue-narrator {{
-        grid-template-columns:1fr;
-        min-height:148px;
-    }}
-
-    .dialogue-box.dialogue-player {{
-        grid-template-columns:1fr minmax(145px,21%);
-    }}
-
-    .dialogue-box.dialogue-player .dialogue-copy {{
-        order:1;
-        text-align:left;
-        align-items:flex-start;
-    }}
-
-    .dialogue-box.dialogue-player .dialogue-portrait {{
-        order:2;
-    }}
-
-    .dialogue-portrait {{
-        position:relative;
-        min-height:148px;
-        overflow:hidden;
-        border-radius:15px;
-        border:1px solid var(--dlg-border);
-        background:var(--dlg-portrait);
-        box-shadow:0 10px 26px rgba(0,0,0,.14);
-        animation:dialoguePortraitEnter .46s cubic-bezier(.2,.8,.2,1) both;
-    }}
-
-    .dialogue-portrait img {{
-        width:100%;
-        height:100%;
-        min-height:148px;
-        max-height:195px;
-        object-fit:cover;
-        object-position:center 28%;
-        display:block;
-    }}
-
-    .dialogue-portrait-fallback {{
-        height:100%;
-        min-height:148px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        color:var(--dlg-text);
-        font-size:clamp(3.2rem,6.7vw,5rem);
-        background:var(--dlg-portrait);
-        opacity:.96;
-    }}
-
-    .dialogue-copy {{
-        min-width:0;
         display:flex;
         flex-direction:column;
         justify-content:center;
-        padding:.08rem .15rem;
+        gap:.24rem;
+        padding:.72rem 1rem .76rem;
+        border:1px solid rgba(255,255,255,.20);
+        border-radius:18px;
+        background:linear-gradient(135deg,rgba(247,248,250,.96),rgba(236,239,245,.95));
+        box-shadow:0 18px 46px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.75);
     }}
 
-    .dialogue-speaker {{
-        color:var(--dlg-accent);
-        font-family:var(--dlg-speaker-font);
-        font-size:clamp(.84rem,1.2vw,.98rem);
-        font-weight:800;
-        letter-spacing:.08em;
-        margin-bottom:.55rem;
-    }}
-
-    .dialogue-text {{
-        color:var(--dlg-text);
-        font-family:var(--dlg-font);
-        font-size:clamp(1.32rem,2vw,1.78rem);
-        line-height:1.58;
-        font-weight:500;
-        word-break:keep-all;
-        text-wrap:pretty;
-    }}
-
-    .dialogue-narrator .dialogue-text {{
-        font-size:clamp(1.34rem,1.95vw,1.76rem);
-        line-height:1.62;
-    }}
+    .dialogue-speaker {{ align-self:flex-start; margin-top:-1.55rem; margin-bottom:.04rem; padding:.32rem .82rem; border-radius:10px 10px 5px 5px; background:#d7e9ff; color:#24558a; font-family:var(--dlg-speaker-font); font-size:.78rem; line-height:1.2; font-weight:900; box-shadow:0 6px 14px rgba(0,0,0,.10); }}
+    .dialogue-copy {{ min-width:0; display:flex; flex-direction:column; justify-content:center; padding:0; }}
+    .dialogue-text {{ color:#204b82; font-family:var(--dlg-font); font-size:clamp(.98rem,1.35vw,1.24rem); line-height:1.5; font-weight:650; word-break:keep-all; text-wrap:pretty; }}
+    .dialogue-narrator .dialogue-text {{ color:#26394d; font-size:clamp(.94rem,1.28vw,1.16rem); }}
 
     @media (max-width:768px) {{
-        .dialogue-scene-stage {{
-            min-height:610px;
-            border-radius:18px;
-        }}
-
-        .dialogue-scene-context {{
-            display:none;
-        }}
-
-        .dialogue-scene-kicker {{
-            top:.82rem;
-            left:.82rem;
-            font-size:.68rem;
-            padding:.3rem .48rem;
-        }}
-
-        .dialogue-box {{
-            grid-template-columns:1fr;
-            gap:.72rem;
-            min-height:285px;
-            padding:.92rem;
-            border-radius:17px;
-        }}
-
-        .dialogue-portrait {{
-            width:82px;
-            min-height:82px;
-            max-height:82px;
-            border-radius:14px;
-        }}
-
-        .dialogue-portrait img,
-        .dialogue-portrait-fallback {{
-            min-height:82px;
-            height:82px;
-            max-height:82px;
-        }}
-
-        .dialogue-portrait-fallback {{
-            font-size:2.55rem;
-        }}
-
-        .dialogue-copy {{
-            justify-content:flex-start;
-            padding:.08rem .08rem .2rem;
-        }}
-
-        .dialogue-speaker {{
-            margin-bottom:.42rem;
-            font-size:.80rem;
-        }}
-
-        .dialogue-text,
-        .dialogue-narrator .dialogue-text {{
-            font-size:clamp(1.16rem,5vw,1.42rem);
-            line-height:1.56;
-        }}
-
-        .dialogue-box.dialogue-narrator {{
-            min-height:210px;
-        }}
-
-        .dialogue-box.dialogue-player {{
-            grid-template-columns:1fr;
-        }}
-
-        .dialogue-box.dialogue-player .dialogue-copy,
-        .dialogue-box.dialogue-player .dialogue-portrait {{
-            order:initial;
-        }}
-
-        .dialogue-box.dialogue-player .dialogue-copy {{
-            text-align:left;
-            align-items:flex-start;
-        }}
-
-        .dialogue-box.dialogue-player .dialogue-portrait {{
-            margin-left:auto;
-        }}
+        .dialogue-scene-stage {{ height:590px; border-radius:16px; }}
+        .dialogue-scene-context {{ display:none; }}
+        .dialogue-scene-character.companion {{ left:24%; right:auto; transform:translateX(-50%); bottom:140px; width:138px; height:195px; }}
+        .dialogue-scene-character.player,
+        .dialogue-scene-character.npc {{ left:76%; right:auto; transform:translateX(-50%); bottom:140px; width:138px; height:195px; }}
+        .dialogue-box {{ min-height:124px; padding:.76rem .86rem .82rem; }}
+        .dialogue-text, .dialogue-narrator .dialogue-text {{ font-size:.98rem; line-height:1.46; }}
     }}
 
     @media (prefers-reduced-motion: reduce) {{
-        .dialogue-scene-stage,
-        .dialogue-scene-background,
-        .dialogue-portrait {{
-            animation:none !important;
-            transform:none !important;
-        }}
+        .dialogue-scene-stage, .dialogue-scene-background, .dialogue-scene-character {{ animation:none !important; transform:none !important; }}
     }}
     </style>
     """
+
 
 
 
@@ -507,6 +373,8 @@ def render_dialogue_scene(
     speaker_name: str,
     text: str,
     portrait_path: str | Path | None = None,
+    companion_portrait_path: str | Path | None = None,
+    player_portrait_path: str | Path | None = None,
     background_path: str | Path | None = None,
     context_label: str | None = None,
     key: str | None = None,
@@ -514,8 +382,7 @@ def render_dialogue_scene(
     show_next_button: bool = True,
     show_scene_chrome: bool = False,
 ) -> bool:
-    """RPG-style Dialogue Scene presentation component."""
-
+    """Visual-novel style V3 Dialogue Scene presentation component."""
     normalized_theme = _normalize_theme(theme)
     normalized_role = _normalize_speaker_type(speaker_type)
     style = _THEME_STYLE[normalized_theme]
@@ -525,69 +392,113 @@ def render_dialogue_scene(
     safe_context = html.escape(str(context_label or "").strip())
 
     portrait_uri = _data_uri(portrait_path)
+    companion_uri = _data_uri(companion_portrait_path)
+    player_uri = _data_uri(player_portrait_path)
     background_uri = _data_uri(background_path)
 
     background_html = (
-        (
-            '<div class="dialogue-scene-background" '
-            f'style="background-image:url(&quot;{background_uri}&quot;);">'
-            '</div>'
-        )
+        '<div class="dialogue-scene-background" ' + f'style="background-image:url(&quot;{background_uri}&quot;);"></div>'
         if background_uri
         else ""
     )
 
     narrator = normalized_role == "narrator"
 
-    if narrator:
-        portrait_html = ""
-        speaker_html = ""
-        box_class = "dialogue-box dialogue-narrator"
-    else:
-        if portrait_uri:
-            portrait_html = (
-                '<div class="dialogue-portrait">'
-                f'<img src="{portrait_uri}" alt="{safe_name} portrait">'
+    # V3_STORY_AGENCY_STAGE_V1_20260908
+    # Companion occupies one fixed left slot. Narration only dims the same
+    # companion sprite; Companion speech restores full opacity. Player is
+    # rendered in the fixed right slot only when an explicit user-selected
+    # dialogue choice is being replayed by the caller.
+    companion_html = ""
+    companion_source = (
+        portrait_uri
+        if normalized_role == "companion" and portrait_uri
+        else companion_uri
+    )
+    if companion_source:
+        companion_state = (
+            "is-active"
+            if normalized_role == "companion"
+            else "is-dim"
+        )
+        companion_html = (
+            f'<div class="dialogue-scene-character companion {companion_state}">'
+            f'<img src="{companion_source}" alt="companion character">'
+            '</div>'
+        )
+    elif normalized_role in {"companion", "narrator", "player"}:
+        companion_state = (
+            "is-active"
+            if normalized_role == "companion"
+            else "is-dim"
+        )
+        companion_html = (
+            f'<div class="dialogue-scene-character companion {companion_state}">'
+            '<div class="dialogue-scene-character-fallback">🐈</div>'
+            '</div>'
+        )
+
+    active_character_html = ""
+    if normalized_role == "player":
+        active_player_uri = player_uri or portrait_uri
+        if active_player_uri:
+            active_character_html = (
+                '<div class="dialogue-scene-character player">'
+                f'<img src="{active_player_uri}" alt="{safe_name} character">'
                 '</div>'
             )
         else:
-            fallback = html.escape(_ROLE_FALLBACK[normalized_role])
-            portrait_html = (
-                '<div class="dialogue-portrait">'
-                f'<div class="dialogue-portrait-fallback">{fallback}</div>'
+            active_character_html = (
+                '<div class="dialogue-scene-character player">'
+                '<div class="dialogue-scene-character-fallback">👤</div>'
+                '</div>'
+            )
+    elif normalized_role == "npc":
+        if portrait_uri:
+            active_character_html = (
+                '<div class="dialogue-scene-character npc">'
+                f'<img src="{portrait_uri}" alt="{safe_name} character">'
+                '</div>'
+            )
+        else:
+            active_character_html = (
+                '<div class="dialogue-scene-character npc">'
+                '<div class="dialogue-scene-character-fallback">◆</div>'
                 '</div>'
             )
 
-        speaker_html = (
-            ""
-            if normalized_role == "player"
-            else f'<div class="dialogue-speaker">{safe_name}</div>'
-        )
-        box_class = (
-            "dialogue-box dialogue-player"
-            if normalized_role == "player"
-            else "dialogue-box"
-        )
+    character_html = companion_html + active_character_html
 
+    speaker_html = (
+        ""
+        if narrator or normalized_role == "player"
+        else f'<div class="dialogue-speaker">{safe_name}</div>'
+    )
     context_html = (
         f'<div class="dialogue-scene-context">{safe_context}</div>'
-        if (show_scene_chrome and safe_context)
+        if show_scene_chrome and safe_context
         else ""
     )
-
-    if normalized_role == "narrator":
-        scene_kicker = "STORY SCENE"
-    elif normalized_role == "companion":
-        scene_kicker = style["scene_label"]
-    elif normalized_role == "player":
-        scene_kicker = "PLAYER CHOICE"
-    else:
-        scene_kicker = "CHARACTER DIALOGUE"
-
+    scene_kicker = (
+        "STORY SCENE"
+        if narrator
+        else style["scene_label"]
+        if normalized_role == "companion"
+        else "PLAYER CHOICE"
+        if normalized_role == "player"
+        else "CHARACTER DIALOGUE"
+    )
     kicker_html = (
         f'<div class="dialogue-scene-kicker">{html.escape(scene_kicker)}</div>'
         if show_scene_chrome
         else ""
+    )
+    box_class = (
+        "dialogue-box dialogue-narrator"
+        if narrator
+        else "dialogue-box dialogue-player"
+        if normalized_role == "player"
+        else "dialogue-box"
     )
 
     st.markdown(
@@ -595,17 +506,10 @@ def render_dialogue_scene(
         + _css(normalized_theme)
         + (
             '<section class="dialogue-scene-stage">'
-            f'{background_html}'
-            f'{kicker_html}'
-            f'{context_html}'
-            f'<div class="{box_class}">'
-            f'{portrait_html}'
-            '<div class="dialogue-copy">'
-            f'{speaker_html}'
-            f'<div class="dialogue-text">{safe_text}</div>'
-            '</div>'
-            '</div>'
-            '</section>'
+            f'{background_html}{kicker_html}{context_html}{character_html}'
+            f'<div class="{box_class}"><div class="dialogue-copy">'
+            f'{speaker_html}<div class="dialogue-text">{safe_text}</div>'
+            '</div></div></section>'
         ),
         unsafe_allow_html=True,
     )
@@ -620,7 +524,6 @@ def render_dialogue_scene(
         + normalized_role
         + "_next"
     )
-
     return bool(
         st.button(
             next_label or style["next_label"],
@@ -628,5 +531,6 @@ def render_dialogue_scene(
             use_container_width=True,
         )
     )
+
 
 # CINEMATIC_STORY_SCENE_V2_20260906

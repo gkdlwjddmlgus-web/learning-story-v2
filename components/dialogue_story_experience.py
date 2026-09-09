@@ -22,6 +22,7 @@ from services.dialogue_runtime_service import (
 
 # DAY6_DIALOGUE_STORY_EXPERIENCE_V1
 # STORY_SCENE_NAVIGATION_SPEAKER_INTEGRITY_V1_2_20260908
+# V3_STORY_AGENCY_STAGE_V1_20260908
 
 
 def _scene_context(
@@ -359,7 +360,7 @@ def render_dialogue_story_experience(
     """
     Existing Chapter Story를 cinematic Dialogue Scene UI로 재생한다.
 
-    - 기본값은 자동 진행 ON
+    - Alpha 기본값은 수동 진행이며 사용자가 원할 때 자동 진행을 켠다.
     - 텍스트 길이에 따라 Scene 체류시간을 계산한다.
     - 수동 다음/건너뛰기는 계속 유지한다.
     - 마지막 Scene이 끝나면 Story seen 처리 후 기존 Story Choice로 넘긴다.
@@ -399,6 +400,16 @@ def render_dialogue_story_experience(
         beat.speaker_type,
         character_id="default",
     )
+    companion_portrait_path = resolve_portrait(
+        theme,
+        "companion",
+        character_id="default",
+    )
+
+    # V3_STORY_AGENCY_STAGE_V1_20260908
+    # Narration does not become Companion speech. The companion remains in
+    # the same left stage slot at low opacity; only Companion beats restore
+    # full opacity. Player is never inferred from ordinary Story text.
 
     background_path = resolve_story_background(
         theme=theme,
@@ -483,7 +494,9 @@ def render_dialogue_story_experience(
     with control_auto:
         auto_enabled = st.toggle(
             "자동 진행",
-            value=True,
+            # The browser must paint Scene 1 before any wall-clock timer can
+            # advance it. Autoplay remains available as an explicit opt-in.
+            value=False,
             key=auto_key,
             help=(
                 "장면 길이에 맞춰 자동으로 다음 Scene으로 넘어갑니다. "
@@ -502,6 +515,7 @@ def render_dialogue_story_experience(
         speaker_name=beat.speaker_name,
         text=beat.text,
         portrait_path=portrait_path,
+        companion_portrait_path=companion_portrait_path,
         background_path=background_path,
         context_label=_scene_context(
             chapter_number=chapter_number,

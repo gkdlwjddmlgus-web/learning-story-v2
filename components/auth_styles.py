@@ -1,56 +1,290 @@
+from __future__ import annotations
+
+import base64
+import mimetypes
+from pathlib import Path
+
 import streamlit as st
 
 
-def apply_auth_styles() -> None:
-    st.markdown(
-        '''
-        <style>
-        html { color-scheme: light !important; }
-        .stApp {
-            background:
-                radial-gradient(circle at 12% 16%, rgba(64,113,175,.18), transparent 28%),
-                radial-gradient(circle at 88% 82%, rgba(86,201,199,.10), transparent 30%),
-                linear-gradient(145deg, #07111f 0%, #0d1c2d 46%, #10263a 100%) !important;
-            color: #edf7ff !important;
-        }
-        [data-testid="stHeader"] { background: rgba(5,13,24,.92) !important; }
-        [data-testid="stToolbar"] { color: #d9f6ff !important; }
-        .main .block-container { max-width: 820px; padding-top: 5rem; }
-        h1,h2,h3,h4,[data-testid="stMarkdownContainer"] { color: #edf7ff; }
-        [data-testid="stCaptionContainer"], .stCaption { color:#9ab4c9 !important; }
-        button[data-baseweb="tab"] { color:#afc8db !important; font-weight:700 !important; }
-        button[data-baseweb="tab"][aria-selected="true"] { color:#74e8ff !important; }
-        div[data-baseweb="tab-highlight"] { background-color:#5ce6ff !important; }
-        .stTextInput input,.stTextArea textarea {
-            background:rgba(8,23,39,.86) !important;
-            color:#f4fbff !important;
-            border:1px solid rgba(112,199,224,.28) !important;
-            border-radius:14px !important;
-        }
-        .stButton > button {
-            min-height:3rem; border-radius:14px !important; font-weight:800 !important;
-            border:1px solid rgba(93,226,255,.55) !important;
-            background:rgba(13,39,59,.88) !important;
-            color:#dffaff !important;
-        }
-        .stButton > button[kind="primary"],
-        .stButton > button[data-testid="stBaseButton-primary"] {
-            background:linear-gradient(135deg,#20a9d1 0%,#4bd6df 100%) !important;
-            color:#041018 !important; border:none !important;
-        }
-        [data-testid="stAlert"] { border-radius:14px !important; }
-        </style>
-        ''',
-        unsafe_allow_html=True,
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+AUTH_BACKGROUND = (
+    PROJECT_ROOT
+    / "assets"
+    / "backgrounds"
+    / "fantasy"
+    / "map1.png"
+)
+
+
+@st.cache_data(show_spinner=False)
+def _auth_background_data_url() -> str:
+    if not AUTH_BACKGROUND.is_file():
+        return ""
+
+    mime = (
+        mimetypes.guess_type(
+            AUTH_BACKGROUND.name
+        )[0]
+        or "image/png"
     )
+
+    encoded = base64.b64encode(
+        AUTH_BACKGROUND.read_bytes()
+    ).decode("ascii")
+
+    return (
+        f"data:{mime};base64,{encoded}"
+    )
+
+
+def apply_auth_styles() -> None:
+    background = (
+        _auth_background_data_url()
+    )
+
+    image_layer = (
+        f'url("{background}")'
+        if background
+        else "none"
+    )
+
     st.markdown(
-        '''
-        <div style="margin:0 0 1.25rem 0;padding:1.15rem 1.25rem;border-radius:18px;
-        border:1px solid rgba(95,226,255,.22);background:rgba(7,22,38,.58);">
-          <div style="color:#65e6ff;font-size:.78rem;font-weight:900;letter-spacing:.16em;margin-bottom:.45rem;">LEARNING STORY</div>
-          <div style="color:#f2fbff;font-size:1.7rem;font-weight:900;line-height:1.25;">Learning Story</div>
-          <div style="color:#9fb9cc;margin-top:.45rem;line-height:1.65;">공부할수록 당신의 이야기가 진행됩니다.</div>
-        </div>
-        ''',
+        f"""
+        <style>
+        /* V3_FULL_EXPECTED_LOGIN_UI_V1_20260908 */
+
+        html {{
+            color-scheme: dark !important;
+        }}
+
+        body,
+        .stApp,
+        div[data-testid="stAppViewContainer"],
+        section[data-testid="stMain"] {{
+            min-height:100dvh !important;
+            height:100dvh !important;
+            overflow:hidden !important;
+        }}
+
+        .stApp {{
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(3,12,27,.18) 0%,
+                    rgba(4,13,29,.08) 36%,
+                    rgba(3,10,23,.52) 72%,
+                    rgba(2,8,19,.82) 100%
+                ),
+                {image_layer},
+                linear-gradient(
+                    145deg,
+                    #0a1730 0%,
+                    #142c4c 50%,
+                    #241d3d 100%
+                ) !important;
+            background-size:cover !important;
+            background-position:center center !important;
+            background-repeat:no-repeat !important;
+            color:#f5f8ff !important;
+        }}
+
+        header[data-testid="stHeader"] {{
+            background:transparent !important;
+            height:2rem !important;
+        }}
+
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        #MainMenu,
+        footer {{
+            display:none !important;
+        }}
+
+        div[data-testid="stMainBlockContainer"],
+        .main .block-container {{
+            width:min(100%, 1180px) !important;
+            max-width:1180px !important;
+            min-height:100dvh !important;
+            height:100dvh !important;
+            box-sizing:border-box !important;
+            padding:clamp(2rem,5vh,4rem) 1.25rem 1.5rem !important;
+            display:flex !important;
+            flex-direction:column !important;
+            justify-content:space-between !important;
+            overflow:hidden !important;
+        }}
+
+        .v3-auth-hero {{
+            width:min(92vw, 780px);
+            margin:0 auto;
+            text-align:center;
+            color:#fff;
+            text-shadow:0 4px 18px rgba(0,0,0,.38);
+        }}
+
+        .v3-auth-title {{
+            font-family:Georgia, "Times New Roman", serif;
+            font-size:clamp(3rem,6.2vw,5.7rem);
+            line-height:.98;
+            font-weight:700;
+            letter-spacing:.015em;
+            margin:0;
+        }}
+
+        .v3-auth-subtitle {{
+            margin:.9rem 0 0;
+            color:rgba(244,249,255,.88);
+            font-size:clamp(1rem,1.8vw,1.45rem);
+            line-height:1.45;
+            font-weight:500;
+        }}
+
+        .st-key-v3_auth_card {{
+            width:min(92vw, 560px) !important;
+            margin:0 auto !important;
+            padding:1.05rem 1.25rem 1.25rem !important;
+            border:1px solid rgba(176,208,242,.28) !important;
+            border-radius:20px !important;
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(9,24,45,.88),
+                    rgba(12,31,55,.80)
+                ) !important;
+            box-shadow:
+                0 22px 70px rgba(0,0,0,.38),
+                inset 0 1px 0 rgba(255,255,255,.07) !important;
+            backdrop-filter:blur(18px) saturate(120%) !important;
+            -webkit-backdrop-filter:blur(18px) saturate(120%) !important;
+        }}
+
+        .st-key-v3_auth_card [data-testid="stTabs"] {{
+            margin-bottom:.65rem !important;
+        }}
+
+        .st-key-v3_auth_card button[data-baseweb="tab"] {{
+            color:rgba(226,236,247,.72) !important;
+            font-size:1rem !important;
+            font-weight:800 !important;
+            padding:.7rem 1rem !important;
+        }}
+
+        .st-key-v3_auth_card button[data-baseweb="tab"][aria-selected="true"] {{
+            color:#f7fbff !important;
+        }}
+
+        .st-key-v3_auth_card div[data-baseweb="tab-highlight"] {{
+            height:2px !important;
+            background:
+                linear-gradient(
+                    90deg,
+                    #72b6ff,
+                    #87dcff
+                ) !important;
+        }}
+
+        .st-key-v3_auth_card .stTextInput {{
+            margin:.2rem 0 .45rem !important;
+        }}
+
+        .st-key-v3_auth_card .stTextInput label {{
+            color:rgba(232,241,250,.86) !important;
+            font-weight:700 !important;
+        }}
+
+        .st-key-v3_auth_card .stTextInput input {{
+            min-height:3.25rem !important;
+            padding:.65rem .9rem !important;
+            border:1px solid rgba(161,196,231,.24) !important;
+            border-radius:13px !important;
+            background:rgba(19,42,68,.72) !important;
+            color:#f8fbff !important;
+            box-shadow:none !important;
+        }}
+
+        .st-key-v3_auth_card .stTextInput input::placeholder {{
+            color:rgba(214,227,241,.48) !important;
+        }}
+
+        .st-key-v3_auth_card div[data-testid="stButton"] > button {{
+            width:100% !important;
+            min-height:3.25rem !important;
+            border-radius:12px !important;
+            font-weight:900 !important;
+        }}
+
+        .st-key-v3_auth_card
+        button[data-testid="stBaseButton-primary"] {{
+            border:none !important;
+            color:#fff !important;
+            background:
+                linear-gradient(
+                    135deg,
+                    #3f8df0 0%,
+                    #579cf6 55%,
+                    #3d84e3 100%
+                ) !important;
+            box-shadow:0 10px 24px rgba(38,112,211,.28) !important;
+        }}
+
+        .v3-auth-card-foot {{
+            margin-top:.55rem;
+            text-align:center;
+            color:rgba(215,226,240,.55);
+            font-size:.73rem;
+        }}
+
+        [data-testid="stAlert"] {{
+            border-radius:12px !important;
+        }}
+
+        @media (max-height: 760px) {{
+            div[data-testid="stMainBlockContainer"],
+            .main .block-container {{
+                padding-top:1rem !important;
+                padding-bottom:.7rem !important;
+            }}
+
+            .v3-auth-title {{
+                font-size:clamp(2.5rem,5.5vw,4rem);
+            }}
+
+            .v3-auth-subtitle {{
+                margin-top:.45rem;
+                font-size:.92rem;
+            }}
+
+            .st-key-v3_auth_card {{
+                padding:.7rem 1rem .85rem !important;
+            }}
+
+            .st-key-v3_auth_card .stTextInput input,
+            .st-key-v3_auth_card div[data-testid="stButton"] > button {{
+                min-height:2.75rem !important;
+            }}
+        }}
+
+        @media (max-width: 620px) {{
+            div[data-testid="stMainBlockContainer"],
+            .main .block-container {{
+                padding-left:.75rem !important;
+                padding-right:.75rem !important;
+            }}
+
+            .v3-auth-title {{
+                font-size:2.7rem;
+            }}
+
+            .v3-auth-subtitle {{
+                font-size:.94rem;
+            }}
+
+            .st-key-v3_auth_card {{
+                width:100% !important;
+            }}
+        }}
+        </style>
+        """,
         unsafe_allow_html=True,
     )

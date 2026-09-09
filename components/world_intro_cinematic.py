@@ -11,6 +11,10 @@ from repositories.world_repository import (
 )
 from services.dialogue_asset_service import resolve_portrait
 from services.story_background_service import resolve_story_background
+from services.story_engine_service import ensure_initial_story_block
+from services.chapter_runtime_service import invalidate_runtime_world
+from services.ai_client import AIQuotaExhausted
+from repositories.world_repository import update_current_chapter
 
 
 # DAY5_WORLD_INTRO_CINEMATIC_V1_2_FINAL_SCENE_SPACING
@@ -538,10 +542,11 @@ def render_world_intro_naming(*, user, world) -> None:
     _inject_css(theme)
 
     if not st.session_state.get(_key(world_id, "name_ready")):
-        if _AUTO_PRE is not None:
-            _AUTO_PRE(user=user, world=world)
-        else:
-            _render_pre_manual(user=user, world=world)
+        # Alpha E2E contract:
+        # elapsed-time autoplay can advance before the browser paints
+        # the first frames. Keep progression deterministic until the
+        # autoplay lifecycle is redesigned around visible-frame state.
+        _render_pre_manual(user=user, world=world)
         return
 
     frames = _THEME_SCRIPT[theme]["encounter"]
@@ -724,10 +729,8 @@ def render_world_intro_post(*, user, world) -> None:
     _inject_css(theme)
 
     if not st.session_state.get(_key(world_id, "post_ready")):
-        if _AUTO_POST is not None:
-            _AUTO_POST(user=user, world=world)
-        else:
-            _render_post_manual(user=user, world=world)
+        # Keep the post-naming reaction deterministic for Alpha as well.
+        _render_post_manual(user=user, world=world)
         return
 
     guide_name = (
@@ -768,6 +771,46 @@ def render_world_intro_post(*, user, world) -> None:
         type="primary",
         use_container_width=True,
     ):
+        # This transition owns preparation of the first playable Chapter.
+        # Never complete the intro while Chapter 1 is still unavailable.
+        try:
+            with st.spinner(
+                f"{guide_name}와 함께할 첫 Story와 Chapter 1을 준비하고 있습니다..."
+            ):
+                ensure_initial_story_block(
+                    user=user,
+                    world=world,
+                )
+
+                update_current_chapter(
+                    world_id=world_id,
+                    chapter_number=1,
+                )
+
+                invalidate_runtime_world(
+                    world_id
+                )
+
+        except AIQuotaExhausted:
+            st.error(
+                "Gemini의 일일 무료 요청 할당량이 소진되어 "
+                "첫 Story와 Chapter 1 생성을 중단했습니다. "
+                "현재 화면과 저장된 World 상태는 유지됩니다."
+            )
+            return
+
+        except Exception as exc:
+            st.error(
+                "첫 Story 또는 Chapter 1을 준비하지 못했습니다. "
+                "현재 화면과 저장된 World 상태는 유지됩니다."
+            )
+            st.caption(
+                f"개발용 오류 유형: "
+                f"{type(exc).__name__}"
+            )
+            return
+
+        st.session_state.world_id = world_id
         st.session_state[_key(world_id, "post_pending")] = False
         st.session_state[_key(world_id, "complete")] = True
         st.rerun()

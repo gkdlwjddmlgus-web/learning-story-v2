@@ -44,13 +44,18 @@ def main() -> int:
     )
     _assert(
         "_render_companion_play_mode(" in learning_source
-        and "section=ACTION_COMPANION" in learning_source,
+        and "using only stored question support data" in learning_source
+        and "concept_brief" in learning_source
+        and "evidence_summary" in learning_source
+        and "evidence_context" in learning_source
+        and "evidence_help" in learning_source,
         "Companion mode does not reuse learning materials",
     )
     _assert(
-        "review_expanded=(" in learning_source
-        and "expanded=review_expanded" in story_source,
-        "Story Review mode does not expand existing review renderer",
+        "_render_v3_story_review_panel(" in learning_source
+        and "review_expanded=False" in learning_source
+        and "render_tools=False" in learning_source,
+        "Story Review mode does not preserve Story runtime with the V3 review panel",
     )
     _assert(
         "set_play_mode(" in hub_source

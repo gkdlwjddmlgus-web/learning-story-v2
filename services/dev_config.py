@@ -65,9 +65,12 @@ def is_dialogue_runtime_enabled() -> bool:
     if env is not None:
         return _to_bool(env)
 
+    # V3 game UI: dialogue story presentation is the default.
+    # Set DIALOGUE_SCENE_RUNTIME_V1=0 only when explicitly testing
+    # the legacy cinematic fallback.
     return _to_bool(
         _secret(
             "DIALOGUE_SCENE_RUNTIME_V1",
-            False,
+            True,
         )
     )

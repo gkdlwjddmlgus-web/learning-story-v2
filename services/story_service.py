@@ -27,8 +27,9 @@ from services.theme_narrative_service import (
 
 BLOCK_SIZE = 3
 OUTLINE_PROMPT_VERSION = "story_outline_v6_theme_narrative_architecture"
-CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v15_agency_continuity_gate"
+CHAPTER_PROMPT_VERSION = "story_chapter_lazy_v16_story_choice_agency"
 # STORY_AGENCY_CONTINUITY_GATE_V1_2_20260904
+# V3_STORY_CHOICE_AGENCY_CONTRACT_V1_20260908
 # THEME_NARRATIVE_ARCHITECTURE_V1_20260904
 # DAY6_STORY_DIALOGUE_INTEGRITY_GATE_V1
 # DAY6_STORY_DIALOGUE_COHERENCE_V1
@@ -347,7 +348,18 @@ CHAPTER_SCHEMA = {
         "story_choices": {
             "type": "array",
             "maxItems": 2,
-            "items": {"type": "string"},
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "choice_type"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "choice_type": {
+                        "type": "string",
+                        "enum": ["action", "dialogue"],
+                    },
+                },
+            },
         },
         "story_summary": {"type": "string"},
         "current_location": {"type": "string"},
@@ -589,14 +601,43 @@ def _normalize_chapter(
     if not str(item.get("title") or "").strip() or not str(item.get("story") or "").strip():
         raise ValueError("Chapter title/story가 비어 있습니다.")
 
-    choices = [str(x).strip() for x in item.get("story_choices", []) if str(x).strip()]
+    raw_choices = item.get("story_choices", []) or []
+    choices: list[dict[str, str]] = []
+    for raw_choice in raw_choices:
+        if isinstance(raw_choice, dict):
+            text_value = str(raw_choice.get("text") or "").strip()
+            choice_type = str(
+                raw_choice.get("choice_type") or "action"
+            ).strip().lower()
+        else:
+            # Backward compatibility for old/mock payloads created before
+            # V3 Story Choice Agency Contract v1.
+            text_value = str(raw_choice or "").strip()
+            choice_type = "action"
+
+        if not text_value:
+            continue
+        if choice_type not in {"action", "dialogue"}:
+            choice_type = "action"
+
+        choices.append(
+            {
+                "text": text_value,
+                "choice_type": choice_type,
+            }
+        )
+
     if chapter_number != block_end or chapter_number >= target_count:
         choices = []
 
     item = dict(item)
     item["story_choices"] = [
-        {"key": chr(ord("A") + i), "text": text}
-        for i, text in enumerate(choices[:2])
+        {
+            "key": chr(ord("A") + i),
+            "text": choice["text"],
+            "choice_type": choice["choice_type"],
+        }
+        for i, choice in enumerate(choices[:2])
     ]
     item["target_concepts"] = list(target_concepts[:2])
     item["story_phase"] = phase
@@ -1122,6 +1163,10 @@ Blueprint:
 - 고양이는 교사가 아니며 정답을 강의하지 않는다.
 - 사용자가 이름 붙인 고양이와 이미 만난 상태를 유지한다.
 - Block 마지막 Chapter이고 전체 마지막이 아니면 0~2 Story Choice 가능. 그 외 story_choices는 빈 배열.
+- story_choices의 각 항목은 {{"text": "...", "choice_type": "action|dialogue"}} 형식이다.
+- 기본은 choice_type="action"이다. Player가 실제로 말하는 것 자체가 Story 분기의 핵심이고 꼭 필요한 순간에만 choice_type="dialogue"를 사용한다.
+- dialogue Choice의 text는 사용자가 직접 고를 실제 발화문만 쓴다. '사용자가 말했다/생각했다' 같은 서술을 붙이지 않는다.
+- 일반 Story 본문에는 Player의 직접 대사·생각·감정·새 행동을 만들지 않는다. Player 발화는 dialogue Story Choice에서 사용자가 실제로 선택한 문장에 한해 UI가 한 번 재생한다.
 - Story State update는 이 Chapter에서 실제 발생한 변화만 반환한다.
 - resolved_threads는 현재 open_threads 중 이번 Chapter에서 실제로 해결된 문장을 정확히 그대로 넣는다. 해결되지 않았으면 빈 배열이다.
 - open_threads_add에는 앞으로 확인해야 할 새 질문만 넣고 이미 해결된 질문을 다시 추가하지 않는다.

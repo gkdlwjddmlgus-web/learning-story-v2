@@ -3,12 +3,15 @@ from __future__ import annotations
 
 # CURRICULUM_SEMANTIC_CONTRACT_V1_20260906
 
+import base64
 import hashlib
+import mimetypes
 import logging
 import html
 import re
 import time
 import traceback
+from pathlib import Path
 
 import streamlit as st
 
@@ -49,7 +52,11 @@ from components.story_cinematic import (
 from components.dialogue_story_experience import (
     render_dialogue_story_experience,
 )
+from components.dialogue_scene import (
+    render_dialogue_scene,
+)
 from services.dialogue_runtime_service import (
+    build_dialogue_beats,
     should_render_dialogue_story,
 )
 from components.text_utils import (
@@ -964,6 +971,8 @@ def _render_chapter_story(
     world,
     chapter,
     review_expanded: bool = False,
+    render_header: bool = True,
+    render_tools: bool = True,
 ) -> bool:
     pack = get_theme_pack(
         world[4]
@@ -1088,67 +1097,76 @@ def _render_chapter_story(
             )
             return True
 
-    # DAY5_COMPACT_LEARNING_UI_V1_CHAPTER
-    render_compact_chapter_header(
-        theme=world[4],
-        chapter_number=chapter[2],
-        block_number=block_number,
-        title=format_inline_text(chapter[3]),
-        meta=(
-            f"{phase_label} · {world[4]} · {world[1]}"
-        ),
-        progress_current=(chapter[2] if total else None),
-        progress_total=(total if total else None),
-    )
-
-    targets = (
-        chapter[
-            CHAPTER_TARGET_CONCEPTS
-        ]
-        if len(chapter)
-        > CHAPTER_TARGET_CONCEPTS
-        else []
-    )
-
-    # Story 다시보기와 학습 목표를 한 줄의 compact utility로 묶어
-    # Investigation이 viewport 상단에 더 빨리 도달하도록 한다.
-    tool_left, tool_right = st.columns(2, gap="small")
-    with tool_left:
-        render_story_experience(
-            chapter_id=chapter[0],
+    if render_header:
+        # DAY5_COMPACT_LEARNING_UI_V1_CHAPTER
+        render_compact_chapter_header(
             theme=world[4],
-            story_text=chapter[4],
             chapter_number=chapter[2],
-            chapter_title=format_inline_text(chapter[3]),
-            review_expanded=review_expanded,
-        )
-        # Marker는 기존 compact/mobile CSS selector 호환을 위해 유지하되,
-        # expander 앞에 별도 Streamlit element gap을 만들지 않도록 뒤로 이동한다.
-        st.markdown(
-            '<span class="compact-learning-tools-marker"></span>',
-            unsafe_allow_html=True,
+            block_number=block_number,
+            title=format_inline_text(chapter[3]),
+            meta=(
+                f"{phase_label} · {world[4]} · {world[1]}"
+            ),
+            progress_current=(chapter[2] if total else None),
+            progress_total=(total if total else None),
+            guide_name=(
+                world[9]
+                if len(world) > 9
+                else None
+            ),
+            learner_level=world[3],
+            topic=world[1],
         )
 
-    with tool_right:
-        with st.expander(
-            "🎯 이번 Chapter의 학습 목표",
-            expanded=False,
-        ):
-            if targets:
-                st.caption(
-                    "핵심 Concept · "
-                    + ", ".join(
-                        targets
-                    )
-                )
+    if render_tools:
+        targets = (
+            chapter[
+                CHAPTER_TARGET_CONCEPTS
+            ]
+            if len(chapter)
+            > CHAPTER_TARGET_CONCEPTS
+            else []
+        )
 
-            for objective in (
-                chapter[5]
-                or []
+        # Story 다시보기와 학습 목표를 한 줄의 compact utility로 묶어
+        # Investigation이 viewport 상단에 더 빨리 도달하도록 한다.
+        tool_left, tool_right = st.columns(2, gap="small")
+        with tool_left:
+            render_story_experience(
+                chapter_id=chapter[0],
+                theme=world[4],
+                story_text=chapter[4],
+                chapter_number=chapter[2],
+                chapter_title=format_inline_text(chapter[3]),
+                review_expanded=review_expanded,
+            )
+            # Marker는 기존 compact/mobile CSS selector 호환을 위해 유지하되,
+            # expander 앞에 별도 Streamlit element gap을 만들지 않도록 뒤로 이동한다.
+            st.markdown(
+                '<span class="compact-learning-tools-marker"></span>',
+                unsafe_allow_html=True,
+            )
+
+        with tool_right:
+            with st.expander(
+                "🎯 이번 Chapter의 학습 목표",
+                expanded=False,
             ):
-                st.markdown(
-                    f"- {format_inline_text(objective)}"
-                )
+                if targets:
+                    st.caption(
+                        "핵심 Concept · "
+                        + ", ".join(
+                            targets
+                        )
+                    )
+
+                for objective in (
+                    chapter[5]
+                    or []
+                ):
+                    st.markdown(
+                        f"- {format_inline_text(objective)}"
+                    )
 
     # DAY5_INVESTIGATION_HEADER_CLEANUP_V1
     # Investigation Board가 문제 풀이 단계의 실제 heading 역할을 하므로,
@@ -1182,7 +1200,6 @@ def _render_chapter_story(
     )
 
     return False
-
 
 def _initialize_quiz_progress_from_db(
     *,
@@ -1286,6 +1303,77 @@ def _response_time_ms() -> int | None:
     )
 
 
+def _story_choice_type(choice: dict | None) -> str:
+    """Old saved Chapters default to action; only explicit metadata enables Player speech."""
+    if not isinstance(choice, dict):
+        return "action"
+
+    value = str(
+        choice.get("choice_type")
+        or "action"
+    ).strip().lower()
+
+    return (
+        "dialogue"
+        if value == "dialogue"
+        else "action"
+    )
+
+
+def _selected_story_choice_payload(
+    *,
+    selected: dict,
+    choices: list,
+) -> dict:
+    selected_key = str(
+        selected.get("choice_key")
+        or ""
+    )
+    selected_text = str(
+        selected.get("choice_text")
+        or ""
+    )
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+
+        choice_key = str(
+            choice.get("key")
+            or ""
+        )
+        choice_text = str(
+            choice.get("text")
+            or ""
+        )
+
+        if (
+            selected_key
+            and choice_key == selected_key
+        ) or (
+            selected_text
+            and choice_text == selected_text
+        ):
+            return choice
+
+    # Existing persisted choices predate choice_type. Never infer Player
+    # dialogue from prose shape; the safe backward-compatible default is action.
+    return {
+        "key": selected_key,
+        "text": selected_text,
+        "choice_type": "action",
+    }
+
+
+def _story_choice_dialogue_ack_key(
+    chapter_id: int,
+) -> str:
+    return (
+        "_v3_story_choice_dialogue_ack_"
+        f"{int(chapter_id)}"
+    )
+
+
 def _render_story_choice(
     *,
     user,
@@ -1320,42 +1408,158 @@ def _render_story_choice(
         )
     )
 
-    st.markdown(
-        "### 이야기에서 무엇을 할까?"
+    guide_name = (
+        world[9]
+        if len(world) > 9
+        and world[9]
+        else "고양이"
     )
-    st.caption(
-        "학습 성적과 관계없이 원하는 Story 방향을 선택할 수 있습니다. "
-        "선택한 방향은 다음 Story Block의 첫 장면에 직접 반영됩니다."
+    companion_portrait = resolve_portrait(
+        world[4],
+        "companion",
+        character_id="default",
+    )
+    background_path = _v3_context_image_path(
+        theme=world[4],
+        chapter_number=chapter[2],
     )
 
     if selected:
+        selected_choice = _selected_story_choice_payload(
+            selected=selected,
+            choices=choices,
+        )
+        selected_text = str(
+            selected.get("choice_text")
+            or selected_choice.get("text")
+            or ""
+        ).strip()
+        choice_type = _story_choice_type(
+            selected_choice
+        )
+
+        # V3_STORY_CHOICE_AGENCY_CONTRACT_V1_20260908
+        # A Player line exists only after the user has explicitly selected a
+        # dialogue-type Story Choice. The chosen text itself is replayed once;
+        # no new Player line is generated or inferred.
+        if choice_type == "dialogue":
+            ack_key = (
+                _story_choice_dialogue_ack_key(
+                    chapter[0]
+                )
+            )
+            if not bool(
+                st.session_state.get(
+                    ack_key,
+                    False,
+                )
+            ):
+                player_portrait = resolve_portrait(
+                    world[4],
+                    "player",
+                    character_id="default",
+                )
+                user_name = (
+                    user.get("display_name")
+                    or user.get("username")
+                    or "나"
+                )
+
+                render_dialogue_scene(
+                    theme=world[4],
+                    speaker_type="player",
+                    speaker_name=user_name,
+                    text=selected_text,
+                    portrait_path=player_portrait,
+                    player_portrait_path=player_portrait,
+                    companion_portrait_path=companion_portrait,
+                    background_path=background_path,
+                    context_label=(
+                        f"CHAPTER {chapter[2]} · 선택의 순간"
+                    ),
+                    show_next_button=False,
+                    show_scene_chrome=True,
+                )
+
+                if st.button(
+                    "이 선택으로 이야기를 이어간다 →",
+                    key=(
+                        "v3_story_choice_dialogue_continue_"
+                        f"{chapter[0]}"
+                    ),
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    st.session_state[
+                        ack_key
+                    ] = True
+                    st.rerun()
+
+                return False
+
+        # Action choices never become Player dialogue.
         st.info(
             "선택한 방향 · "
-            + selected[
-                "choice_text"
-            ]
+            + selected_text
         )
         return True
 
+    render_dialogue_scene(
+        theme=world[4],
+        speaker_type="narrator",
+        speaker_name="NARRATOR",
+        text=(
+            "이제 이야기의 다음 방향을 직접 선택할 차례입니다. "
+            "말해야 하는 순간에만 대화 선택지가 Player의 발화로 이어집니다."
+        ),
+        companion_portrait_path=companion_portrait,
+        background_path=background_path,
+        context_label=(
+            f"CHAPTER {chapter[2]} · STORY CHOICE"
+        ),
+        show_next_button=False,
+        show_scene_chrome=True,
+    )
+
+    st.markdown(
+        '<div class="v3-story-choice-heading">'
+        '<strong>이야기에서 무엇을 할까?</strong>'
+        '<span>선택한 방향은 다음 Story Block의 첫 장면에 반영됩니다.</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
     for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+
         key = str(
             choice.get(
                 "key",
                 "",
             )
         )
-        text = str(
+        choice_text = str(
             choice.get(
                 "text",
                 "",
             )
         )
+        choice_type = _story_choice_type(
+            choice
+        )
 
-        if not key or not text:
+        if not key or not choice_text:
             continue
 
+        choice_prefix = (
+            "💬 "
+            if choice_type == "dialogue"
+            else "➜ "
+        )
+
         if st.button(
-            text,
+            choice_prefix + choice_text,
             key=(
                 f"story_choice_"
                 f"{chapter[0]}_{key}"
@@ -1374,7 +1578,7 @@ def _render_story_choice(
                 ),
                 chapter_id=chapter[0],
                 choice_key=key,
-                choice_text=text,
+                choice_text=choice_text,
             )
 
             queue_event(
@@ -1391,11 +1595,18 @@ def _render_story_choice(
                 chapter_id=chapter[0],
                 metadata={
                     "choice_key": key,
-                    "choice_text": text,
+                    "choice_text": choice_text,
+                    "choice_type": choice_type,
                 },
                 flush=True,
             )
 
+            st.session_state.pop(
+                _story_choice_dialogue_ack_key(
+                    chapter[0]
+                ),
+                None,
+            )
             st.rerun()
 
     return False
@@ -1934,12 +2145,475 @@ def _inject_quiz_choice_card_css(
         unsafe_allow_html=True,
     )
 
+# V3_FULL_EXPECTED_PLAY_UI_V1_20260908
+_THEME_ASSET_SLUG = {
+    "동화": "fairy",
+    "판타지": "fantasy",
+    "SF": "sf",
+    "무협": "wuxia",
+    "미스터리": "mystery",
+}
+
+
+def _v3_context_image_path(
+    *,
+    theme: str,
+    chapter_number: int,
+) -> Path | None:
+    slug = _THEME_ASSET_SLUG.get(
+        theme
+    )
+    if not slug:
+        return None
+
+    index = (
+        (max(1, int(chapter_number)) - 1)
+        % 8
+        + 1
+    )
+    base = (
+        Path(__file__).resolve().parents[1]
+        / "assets"
+        / "backgrounds"
+        / slug
+    )
+
+    for extension in (
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+    ):
+        candidate = (
+            base
+            / f"map{index}{extension}"
+        )
+        if candidate.is_file():
+            return candidate
+
+    return None
+
+
+def _v3_file_data_uri(
+    path: str | Path | None,
+) -> str | None:
+    if not path:
+        return None
+
+    file_path = Path(path)
+    if not file_path.is_file():
+        return None
+
+    mime_type, _ = mimetypes.guess_type(
+        file_path.name
+    )
+    mime_type = mime_type or "image/png"
+    encoded = base64.b64encode(
+        file_path.read_bytes()
+    ).decode("ascii")
+    return (
+        f"data:{mime_type};base64,{encoded}"
+    )
+
+
+def _v3_story_evidence_items(
+    chapter,
+) -> list[str]:
+    items: list[str] = []
+
+    for question in (
+        chapter[6]
+        or []
+    ):
+        for key in (
+            "evidence_summary",
+            "evidence_context",
+        ):
+            value = _sanitize_learning_text(
+                question.get(key)
+            )
+            if value and value not in items:
+                items.append(value)
+            if len(items) >= 3:
+                return items
+
+    for objective in (
+        chapter[5]
+        or []
+    ):
+        value = _sanitize_learning_text(
+            objective
+        )
+        if value and value not in items:
+            items.append(value)
+        if len(items) >= 3:
+            break
+
+    return items
+
+
+def _render_v3_story_review_panel(
+    *,
+    world,
+    chapter,
+) -> None:
+    """Render Story Review as a stable three-panel game surface."""
+    guide_name = (
+        world[9]
+        if len(world) > 9
+        and world[9]
+        else "고양이"
+    )
+    beats = build_dialogue_beats(
+        story_text=chapter[4],
+        guide_name=guide_name,
+    )
+
+    if not beats:
+        return
+
+    scene_key = (
+        f"v3_review_scene_"
+        f"{int(chapter[0])}"
+    )
+    selected_scene = int(
+        st.session_state.get(
+            scene_key,
+            0,
+        )
+    )
+    selected_scene = max(
+        0,
+        min(
+            selected_scene,
+            len(beats) - 1,
+        ),
+    )
+
+    st.markdown(
+        '<div class="v3-mode-heading">'
+        '<span class="v3-mode-icon">📜</span>'
+        '<span><strong>기록의 두루마리</strong>'
+        '<small>장면을 선택해 이야기와 단서를 함께 확인합니다.</small></span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    scene_col, story_col, clue_col = st.columns(
+        [0.20, 0.53, 0.27],
+        gap="medium",
+    )
+
+    with scene_col:
+        st.markdown(
+            '<div class="v3-review-scene-list-title">장면 목록</div>',
+            unsafe_allow_html=True,
+        )
+        selected_scene = st.radio(
+            "스토리 장면",
+            options=range(
+                len(beats)
+            ),
+            index=selected_scene,
+            format_func=lambda i: (
+                f"Scene {i + 1}"
+            ),
+            key=scene_key,
+            label_visibility="collapsed",
+        )
+
+    with story_col:
+        beat = beats[selected_scene]
+        background_path = _v3_context_image_path(
+            theme=world[4],
+            chapter_number=chapter[2],
+        )
+        companion_portrait = resolve_portrait(
+            world[4],
+            "companion",
+            character_id="default",
+        )
+        background_uri = _v3_file_data_uri(
+            background_path
+        )
+        companion_uri = _v3_file_data_uri(
+            companion_portrait
+        )
+        safe_text = html.escape(
+            format_inline_text(
+                _sanitize_learning_text(
+                    beat.text
+                )
+            )
+        )
+        background_style = (
+            f'background-image:url("{background_uri}");'
+            if background_uri
+            else ""
+        )
+        companion_state = (
+            "is-active"
+            if beat.speaker_type == "companion"
+            else "is-dim"
+        )
+        portrait_html = (
+            '<div class="v3-review-character v3-review-character-v32 '
+            f'{companion_state}">'
+            f'<img src="{companion_uri}" alt="companion">'
+            '</div>'
+            if companion_uri
+            else ""
+        )
+        if beat.speaker_type == "companion":
+            speaker_label = html.escape(
+                format_inline_text(
+                    beat.speaker_name
+                    or guide_name
+                )
+            )
+        elif beat.speaker_type == "npc":
+            speaker_label = html.escape(
+                format_inline_text(
+                    beat.speaker_name
+                    or "NPC"
+                )
+            )
+        else:
+            speaker_label = "NARRATION"
+
+        st.markdown(
+            '<section class="v3-review-stage v3-review-stage-v32" '
+            f'style="{html.escape(background_style, quote=True)}">'
+            f'{portrait_html}'
+            '<div class="v3-review-dialogue v3-review-dialogue-v32">'
+            f'<div class="v3-review-speaker">{speaker_label}</div>'
+            f'<div class="v3-review-scene-label">SCENE {selected_scene + 1}</div>'
+            f'<div class="v3-review-text">{safe_text}</div>'
+            '</div>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+
+    with clue_col:
+        evidence_items = _v3_story_evidence_items(
+            chapter
+        )
+        if evidence_items:
+            evidence_html = "".join(
+                '<li>'
+                + html.escape(
+                    format_inline_text(
+                        _sanitize_learning_text(
+                            item
+                        )
+                    )
+                )
+                + '</li>'
+                for item in evidence_items
+            )
+        else:
+            evidence_html = (
+                '<div class="v3-review-side-empty">'
+                '아직 정리된 단서가 없습니다.'
+                '</div>'
+            )
+
+        targets = (
+            chapter[CHAPTER_TARGET_CONCEPTS]
+            if len(chapter) > CHAPTER_TARGET_CONCEPTS
+            else []
+        )
+        keyword_values = (
+            [
+                format_inline_text(
+                    _sanitize_learning_text(
+                        item
+                    )
+                )
+                for item in targets
+                if _sanitize_learning_text(
+                    item
+                )
+            ]
+            if targets
+            else [
+                format_inline_text(
+                    _sanitize_learning_text(
+                        world[1]
+                    )
+                )
+            ]
+        )
+        keyword_html = "".join(
+            '<span class="v3-review-keyword-chip">'
+            + html.escape(value)
+            + '</span>'
+            for value in keyword_values
+            if value
+        )
+
+        st.markdown(
+            '<div class="v3-review-side-stack">'
+            '<section class="v3-review-side-card v3-review-clue-card">'
+            '<div class="v3-review-side-title">🔎 주요 단서</div>'
+            + (
+                '<ul class="v3-review-side-list">'
+                + evidence_html
+                + '</ul>'
+                if evidence_items
+                else evidence_html
+            )
+            + '</section>'
+            '<section class="v3-review-side-card v3-review-keyword-card">'
+            '<div class="v3-review-side-title">핵심 키워드</div>'
+            '<div class="v3-review-keyword-wrap">'
+            + (
+                keyword_html
+                or '<span class="v3-review-side-empty">정리된 키워드가 없습니다.</span>'
+            )
+            + '</div>'
+            '</section>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
+
+def _render_v3_shell_nav(
+    *,
+    world,
+) -> None:
+    pack = get_theme_pack(
+        world[4]
+    )
+    section_key = (
+        f"v3_main_section_{world[0]}"
+    )
+
+    spacer, archive_col, report_col = st.columns(
+        [0.82, 0.09, 0.09],
+        gap="small",
+    )
+
+    with spacer:
+        st.markdown(
+            '<span class="v3-game-shell-marker"></span>',
+            unsafe_allow_html=True,
+        )
+
+    with archive_col:
+        if st.button(
+            "📚 기록",
+            key=f"v3_shell_archive_{world[0]}",
+            help=pack["archive_name"],
+            use_container_width=True,
+        ):
+            st.session_state[section_key] = pack["archive_name"]
+            st.rerun()
+
+    with report_col:
+        if st.button(
+            "📊 분석",
+            key=f"v3_shell_report_{world[0]}",
+            help=pack["report_name"],
+            use_container_width=True,
+        ):
+            st.session_state[section_key] = pack["report_name"]
+            st.rerun()
+
+
+
+
+# V3_QUIZ_EVIDENCE_VISUAL_CONTRACT_FIX_V3_1_20260908
+def _render_v3_quiz_evidence_card(
+    *,
+    task_label: str,
+    evidence_summary: str,
+    evidence_context: str,
+) -> None:
+    """
+    Render Quiz Evidence as one owned HTML surface.
+
+    Streamlit's bordered-container descendants inherit theme rules through
+    several generated wrappers. Styling only the outer wrapper therefore
+    produced a dark card while some nested Markdown text remained dark.
+    Keeping the Evidence copy in one semantic HTML surface makes contrast
+    deterministic across Mystery/Fantasy/SF themes.
+    """
+    safe_task = html.escape(
+        _sanitize_learning_text(
+            task_label
+        )
+    )
+    safe_summary = html.escape(
+        _sanitize_learning_text(
+            evidence_summary
+        )
+    )
+    safe_context = html.escape(
+        _sanitize_learning_text(
+            evidence_context
+        )
+    )
+
+    parts = [
+        '<section class="v3-evidence-card">',
+        '<div class="v3-evidence-kicker">EVIDENCE</div>',
+    ]
+
+    if safe_task:
+        parts.append(
+            '<div class="v3-evidence-task">'
+            f'{safe_task}'
+            '</div>'
+        )
+
+    if safe_summary:
+        parts.extend(
+            [
+                '<div class="v3-evidence-heading">단서 요약</div>',
+                '<p class="v3-evidence-copy">',
+                safe_summary,
+                '</p>',
+            ]
+        )
+
+    if safe_context:
+        parts.extend(
+            [
+                '<div class="v3-evidence-heading">검토 보고서</div>',
+                '<p class="v3-evidence-copy">',
+                safe_context,
+                '</p>',
+            ]
+        )
+
+    if not safe_summary and not safe_context:
+        parts.append(
+            '<p class="v3-evidence-empty">'
+            '현재 문제에 별도의 Evidence가 저장되어 있지 않습니다.'
+            '</p>'
+        )
+
+    parts.append(
+        '</section>'
+    )
+
+    st.markdown(
+        "".join(
+            parts
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def render_quiz(
     *,
     user,
     world,
     chapter,
 ) -> None:
+    """V3 compact game-style two-panel Quiz; write semantics are preserved."""
     st.markdown(
         generated_text_readability_css(),
         unsafe_allow_html=True,
@@ -1947,6 +2621,7 @@ def render_quiz(
     _inject_dark_quiz_readability_css(
         world[4]
     )
+
     if chapter[7]:
         render_chapter_complete(
             user=user,
@@ -1955,11 +2630,7 @@ def render_quiz(
         )
         return
 
-    questions = (
-        chapter[6]
-        or []
-    )
-
+    questions = chapter[6] or []
     if not questions:
         return
 
@@ -1970,19 +2641,13 @@ def render_quiz(
         questions=questions,
     )
 
-    index = st.session_state.get(
-        "question_index",
-        0,
+    index = int(
+        st.session_state.get(
+            "question_index",
+            0,
+        )
     )
-    _inject_quiz_choice_card_css(
-        world[4],
-        chapter_id=chapter[0],
-        question_index=index,
-    )
-
-    if index >= len(
-        questions
-    ):
+    if index >= len(questions):
         render_chapter_complete(
             user=user,
             world=world,
@@ -1990,10 +2655,7 @@ def render_quiz(
         )
         return
 
-    question = questions[
-        index
-    ]
-
+    question = questions[index]
     _start_question_timer(
         chapter_id=chapter[0],
         index=index,
@@ -2002,18 +2664,13 @@ def render_quiz(
     context = get_runtime_story_context(
         world[0]
     )
-
     arc_id = (
         context["arc"]["id"]
         if context
         else None
     )
-
     queue_once(
-        key=(
-            f"question_start_"
-            f"{chapter[0]}_{index}"
-        ),
+        key=f"question_start_{chapter[0]}_{index}",
         event_type="question_start",
         user_id=user["user_id"],
         world_id=world[0],
@@ -2021,383 +2678,243 @@ def render_quiz(
         chapter_id=chapter[0],
         metadata={
             "question_index": index,
-            "concept": question.get(
-                "concept"
-            ),
-            "difficulty": question.get(
-                "difficulty"
-            ),
+            "concept": question.get("concept"),
+            "difficulty": question.get("difficulty"),
         },
     )
 
     guide_name = (
         world[9]
-        if len(world) > 9
-        and world[9]
+        if len(world) > 9 and world[9]
         else "고양이"
     )
-
     user_name = (
-        user.get(
-            "display_name"
-        )
-        or user.get(
-            "username"
-        )
+        user.get("display_name")
+        or user.get("username")
         or "나"
     )
+    question_submitted = bool(
+        st.session_state.get(
+            "question_submitted",
+            False,
+        )
+    )
 
-    task_label = format_inline_text(
+    evidence_summary = _sanitize_learning_text(
+        question.get("evidence_summary")
+    )
+    evidence_context = _sanitize_learning_text(
+        question.get("evidence_context")
+    )
+    task_label = _sanitize_learning_text(
         question.get("task_label")
-        or ""
-    )
-    experience_profile = get_theme_experience_profile(world[4])
-
-    if task_label:
-        investigation_meta = (
-            f"{guide_name}와 함께 · "
-            f"{experience_profile['step_noun']} {index + 1} / {len(questions)} · "
-            f"{task_label}"
-        )
-    else:
-        investigation_meta = (
-            f"{guide_name}와 함께 · "
-            f"{experience_profile['step_noun']} {index + 1} / {len(questions)}"
-        )
-
-    question_submitted = st.session_state.get(
-        "question_submitted",
-        False,
     )
 
-    # DAY6_INVESTIGATION_FLOW_UX_V3
-    # Evidence는 선택형 행동이 아니라 현재 문제의 고정 관찰 자료로 항상 먼저 보여준다.
-    _render_fixed_question_evidence(
-        theme=world[4],
-        question=question,
+    evidence_col, problem_col = st.columns(
+        [0.36, 0.64],
+        gap="medium",
     )
 
-    active_action = render_investigation_board(
-        theme=world[4],
-        guide_name=guide_name,
-        chapter_id=chapter[0],
-        question_index=index,
-        default_action=ACTION_DEDUCE,
-        require_companion_before_deduce=False,
-        context_meta=investigation_meta,
-    )
-
-    if active_action is None:
-        return
-
-    if active_action == ACTION_COMPANION:
-        # 동료는 Evidence를 반복하지 않고 개념 회상/용어 도움/사고 방향만 제공한다.
-        _render_learning_materials(
-            theme=world[4],
-            learner_level=world[3],
-            difficulty=(question.get("difficulty") or "basic"),
-            question=question,
-            guide_name=guide_name,
-            section=ACTION_COMPANION,
-        )
-    else:
+    with evidence_col:
         st.markdown(
-            '<span class="inv-question-title-marker"></span>',
+            '<div class="v3-panel-title"><span>🔎</span>'
+            '<span><strong>사건의 단서</strong>'
+            '<small>문제를 풀기 전에 확인해야 할 정보입니다.</small></span></div>',
             unsafe_allow_html=True,
         )
-        render_quiz_question_scene(
+        context_image = _v3_context_image_path(
             theme=world[4],
             chapter_number=chapter[2],
-            chapter_title=format_inline_text(chapter[3]),
-            question_number=index + 1,
-            question_count=len(questions),
-            question_text=format_inline_text(question["question"]),
+        )
+        if context_image is not None:
+            st.image(
+                str(context_image),
+                use_container_width=True,
+            )
+        _render_v3_quiz_evidence_card(
+            task_label=task_label,
+            evidence_summary=evidence_summary,
+            evidence_context=evidence_context,
         )
 
-    if not question_submitted:
-        if active_action != ACTION_DEDUCE:
+    with problem_col:
+        st.markdown(
+            '<div class="v3-panel-title"><span>❔</span>'
+            '<span><strong>문제</strong>'
+            f'<small>조사 {index + 1} / {len(questions)}</small></span></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<section class="v3-question-card">'
+            '<div class="v3-question-kicker">QUESTION</div>'
+            f'<div class="v3-question-progress">Q {index + 1} / {len(questions)}</div>'
+            f'<div class="v3-question-text">{html.escape(format_inline_text(question["question"]))}</div>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+
+        if not question_submitted:
+            selected = st.radio(
+                "답을 선택하세요.",
+                options=range(len(question["choices"])),
+                format_func=lambda i: (
+                    f"{i + 1}. {format_inline_text(question['choices'][i])}"
+                ),
+                key=f"question_{chapter[0]}_{index}",
+                label_visibility="collapsed",
+            )
+
+            if st.button(
+                "✦ 답안을 제출하기",
+                type="primary",
+                key=f"submit_{chapter[0]}_{index}",
+                use_container_width=True,
+            ):
+                correct_index = question["correct_index"]
+                is_correct = selected == correct_index
+                difficulty = question.get("difficulty") or "basic"
+                response_time_ms = _response_time_ms()
+
+                create_attempt(
+                    user_id=user["user_id"],
+                    world_id=world[0],
+                    chapter_id=chapter[0],
+                    concept=question["concept"],
+                    question_text=question["question"],
+                    user_answer=question["choices"][selected],
+                    is_correct=is_correct,
+                    difficulty=difficulty,
+                    response_time_ms=response_time_ms,
+                )
+
+                mastery_update_ok = False
+                mastery_score_after = None
+                try:
+                    mastery_score_after = update_mastery_from_attempt(
+                        user_id=user["user_id"],
+                        world_id=world[0],
+                        concept=question["concept"],
+                        is_correct=is_correct,
+                        difficulty=difficulty,
+                    )
+                    mastery_update_ok = True
+                except Exception:
+                    LOGGER.exception(
+                        "Mastery update failed user_id=%s world_id=%s chapter_id=%s concept=%r",
+                        user["user_id"],
+                        world[0],
+                        chapter[0],
+                        question["concept"],
+                    )
+
+                queue_event(
+                    "question_answered",
+                    user_id=user["user_id"],
+                    world_id=world[0],
+                    story_arc_id=arc_id,
+                    chapter_id=chapter[0],
+                    metadata={
+                        "question_index": index,
+                        "concept": question["concept"],
+                        "difficulty": difficulty,
+                        "is_correct": is_correct,
+                        "response_time_ms": response_time_ms,
+                        "mastery_update_ok": mastery_update_ok,
+                        "mastery_score_after": mastery_score_after,
+                    },
+                )
+                st.session_state["selected_answer"] = selected
+                st.session_state["question_submitted"] = True
+                set_investigation_action(
+                    chapter_id=chapter[0],
+                    question_index=index,
+                    action=ACTION_DEDUCE,
+                )
+                st.session_state["show_npc_reply"] = False
+                st.rerun()
             return
 
-        selected = st.radio(
-            "답을 선택하세요.",
-            options=range(
-                len(
-                    question[
-                        "choices"
-                    ]
-                )
-            ),
-            format_func=lambda i: (
-                f"{i + 1}. "
-                f"{format_inline_text(question['choices'][i])}"
-            ),
-            key=(
-                f"question_"
-                f"{chapter[0]}_{index}"
-            ),
-        )
-
-        if st.button(
-            "응답하기",
-            type="primary",
-            key=(
-                f"submit_"
-                f"{chapter[0]}_{index}"
-            ),
-            use_container_width=True,
-        ):
-            correct_index = (
-                question[
-                    "correct_index"
-                ]
-            )
-            is_correct = (
-                selected
-                == correct_index
-            )
-
-            difficulty = (
-                question.get(
-                    "difficulty"
-                )
-                or "basic"
-            )
-
-            response_time_ms = (
-                _response_time_ms()
-            )
-
-            create_attempt(
-                user_id=user[
-                    "user_id"
-                ],
-                world_id=world[0],
-                chapter_id=chapter[0],
-                concept=question[
-                    "concept"
-                ],
-                question_text=question[
-                    "question"
-                ],
-                user_answer=question[
-                    "choices"
-                ][selected],
-                is_correct=is_correct,
-                difficulty=difficulty,
-                response_time_ms=(
-                    response_time_ms
-                ),
-            )
-
-            mastery_update_ok = False
-            mastery_score_after = None
-            try:
-                mastery_score_after = update_mastery_from_attempt(
-                    user_id=user[
-                        "user_id"
-                    ],
-                    world_id=world[0],
-                    concept=question[
-                        "concept"
-                    ],
-                    is_correct=(
-                        is_correct
-                    ),
-                    difficulty=(
-                        difficulty
-                    ),
-                )
-                mastery_update_ok = True
-            except Exception:
-                # Attempt는 유지하되 파생 Mastery 실패는 반드시 로그로 남긴다.
-                LOGGER.exception(
-                    "Mastery update failed user_id=%s world_id=%s chapter_id=%s concept=%r",
-                    user["user_id"],
-                    world[0],
-                    chapter[0],
-                    question["concept"],
-                )
-
-            queue_event(
-                "question_answered",
-                user_id=user[
-                    "user_id"
-                ],
-                world_id=world[0],
-                story_arc_id=arc_id,
-                chapter_id=chapter[0],
-                metadata={
-                    "question_index": index,
-                    "concept": question[
-                        "concept"
-                    ],
-                    "difficulty": difficulty,
-                    "is_correct": (
-                        is_correct
-                    ),
-                    "response_time_ms": (
-                        response_time_ms
-                    ),
-                    "mastery_update_ok": mastery_update_ok,
-                    "mastery_score_after": mastery_score_after,
-                },
-            )
-
-            st.session_state[
-                "selected_answer"
-            ] = selected
-            st.session_state[
-                "question_submitted"
-            ] = True
-            set_investigation_action(
-                chapter_id=chapter[0],
-                question_index=index,
-                action=ACTION_DEDUCE,
-            )
-            st.session_state[
-                "show_npc_reply"
-            ] = False
-
-            st.rerun()
-
-        return
-
-    selected_answer = st.session_state[
-        "selected_answer"
-    ]
-
-    correct_index = question[
-        "correct_index"
-    ]
-
-    is_correct = (
-        selected_answer
-        == correct_index
-    )
-
-    user_answer_text = (
-        _format_choice_reply(
-            choice_number=(selected_answer + 1),
+        selected_answer = st.session_state["selected_answer"]
+        correct_index = question["correct_index"]
+        is_correct = selected_answer == correct_index
+        user_answer_text = _format_choice_reply(
+            choice_number=selected_answer + 1,
             choice_text=question["choices"][selected_answer],
         )
-    )
-
-    feedback = (
-        question.get(
-            "correct_feedback"
-        )
-        if is_correct
-        else question.get(
-            "wrong_feedback"
-        )
-    )
-
-    if not feedback:
         feedback = (
-            "응, 그 선택이 맞아. 다음 단서로 이어가보자."
+            question.get("correct_feedback")
             if is_correct
-            else "조금 어긋난 것 같아. 방금 본 단서를 한 번 더 비교해볼까?"
+            else question.get("wrong_feedback")
         )
+        if not feedback:
+            feedback = (
+                "응, 그 선택이 맞아. 다음 단서로 이어가보자."
+                if is_correct
+                else "조금 어긋난 것 같아. 방금 본 단서를 한 번 더 비교해볼까?"
+            )
 
-    feedback_active = render_quiz_feedback_dialogue(
-        chapter_id=chapter[0],
-        question_index=index,
-        theme=world[4],
-        chapter_number=chapter[2],
-        question_number=index + 1,
-        user_name=user_name,
-        user_answer_text=user_answer_text,
-        guide_name=guide_name,
-        feedback=feedback,
-        is_correct=is_correct,
-    )
-
-    if feedback_active:
-        return
-    story_progress = _sanitize_learning_text(
-        question.get("story_progress")
-    )
-
-    if story_progress:
-        render_quiz_result_narration(
-            theme=world[4],
-            text=story_progress,
-            is_correct=is_correct,
-            is_conclusion_step=(
-                index == len(questions) - 1
-            ),
-        )
-
-    pack = get_theme_pack(
-        world[4]
-    )
-
-    explanation = (
-        question.get(
-            "explanation"
-        )
-        or "핵심 개념을 다시 확인해보세요."
-    )
-
-    correct_answer = (
-        None
-        if is_correct
-        else (
-            f"{correct_index + 1}. "
-            f"{question['choices'][correct_index]}"
-        )
-    )
-
-    with st.expander(
-        "📘 학습 노트 확인하기",
-        expanded=False,
-    ):
-        _render_learning_note(
-            label=pack[
-                "learning_note"
-            ],
-            explanation=explanation,
-            correct_answer=(
-                correct_answer
-            ),
-        )
-
-    next_label = get_theme_experience_profile(world[4])["next_label"]
-
-    if st.button(
-        next_label,
-        key=(
-            f"next_"
-            f"{chapter[0]}_{index}"
-        ),
-        use_container_width=True,
-    ):
-        st.session_state[
-            "question_index"
-        ] = index + 1
-        st.session_state[
-            "question_submitted"
-        ] = False
-
-        clear_investigation_question_state(
+        feedback_active = render_quiz_feedback_dialogue(
             chapter_id=chapter[0],
             question_index=index,
+            theme=world[4],
+            chapter_number=chapter[2],
+            question_number=index + 1,
+            user_name=user_name,
+            user_answer_text=user_answer_text,
+            guide_name=guide_name,
+            feedback=feedback,
+            is_correct=is_correct,
         )
+        if feedback_active:
+            return
 
-        for key in (
-            "selected_answer",
-            "show_npc_reply",
-            "question_timer_key",
-            "question_started_at",
+        story_progress = _sanitize_learning_text(
+            question.get("story_progress")
+        )
+        if story_progress:
+            render_quiz_result_narration(
+                theme=world[4],
+                text=story_progress,
+                is_correct=is_correct,
+                is_conclusion_step=(index == len(questions) - 1),
+            )
+
+        pack = get_theme_pack(world[4])
+        explanation = question.get("explanation") or "핵심 개념을 다시 확인해보세요."
+        correct_answer = (
+            None
+            if is_correct
+            else f"{correct_index + 1}. {question['choices'][correct_index]}"
+        )
+        with st.expander("📘 학습 노트 확인하기", expanded=False):
+            _render_learning_note(
+                label=pack["learning_note"],
+                explanation=explanation,
+                correct_answer=correct_answer,
+            )
+
+        next_label = get_theme_experience_profile(world[4])["next_label"]
+        if st.button(
+            next_label,
+            key=f"next_{chapter[0]}_{index}",
+            use_container_width=True,
         ):
-            if key in (
-                st.session_state
+            st.session_state["question_index"] = index + 1
+            st.session_state["question_submitted"] = False
+            clear_investigation_question_state(
+                chapter_id=chapter[0],
+                question_index=index,
+            )
+            for key in (
+                "selected_answer",
+                "show_npc_reply",
+                "question_timer_key",
+                "question_started_at",
             ):
-                del st.session_state[
-                    key
-                ]
+                st.session_state.pop(key, None)
+            st.rerun()
 
-        st.rerun()
+
 
 
 # V3_ACTION_HUB_V1_20260908
@@ -2407,7 +2924,7 @@ def _render_companion_play_mode(
     world,
     chapter,
 ) -> None:
-    """Reuse current-question learning support without generation work."""
+    """V3 companion conversation using only stored question support data."""
     guide_name = (
         world[9]
         if len(world) > 9
@@ -2428,17 +2945,11 @@ def _render_companion_play_mode(
     )
     if not questions:
         st.info(
-            f"{guide_name}의 문제별 학습 도움은 "
+            f"{guide_name}와의 문제별 대화는 "
             "문제가 준비된 뒤 확인할 수 있습니다."
-        )
-        st.caption(
-            "문제 풀기에서 기존 문제 준비 흐름을 이용하세요. "
-            "이 화면 전환만으로는 Gemini를 호출하지 않습니다."
         )
         return
 
-    # 기존 Quiz progress restore를 그대로 재사용한다.
-    # 같은 Chapter에서 한 번 초기화되면 session_state guard로 재조회하지 않는다.
     _initialize_quiz_progress_from_db(
         user=user,
         world=world,
@@ -2460,167 +2971,822 @@ def _render_companion_play_mode(
         return
 
     question = questions[index]
-    experience_profile = get_theme_experience_profile(
-        world[4]
-    )
-    st.markdown(
-        f"### 🐈 {format_inline_text(guide_name)}와 함께 보기"
-    )
-    st.caption(
-        f"{experience_profile['step_noun']} {index + 1} / {len(questions)} · "
-        "현재 문제의 단서와 개념 도움만 확인합니다."
+    prompt_key = (
+        f"v3_companion_prompt_"
+        f"{chapter[0]}_{index}"
     )
 
-    _render_fixed_question_evidence(
-        theme=world[4],
-        question=question,
+    selected_prompt = int(
+        st.session_state.get(
+            prompt_key,
+            0,
+        )
     )
-    _render_learning_materials(
-        theme=world[4],
-        learner_level=world[3],
-        difficulty=(
-            question.get("difficulty")
-            or "basic"
+
+    prompts = [
+        "핵심 개념을 다시 설명해줘.",
+        "어떤 단서를 먼저 봐야 할까?",
+        "이상한 점을 어떻게 판단하지?",
+        "지금까지의 단서를 정리해줘.",
+        "다른 관점에서 생각할 방법이 있을까?",
+    ]
+
+    concept_brief = _sanitize_learning_text(
+        question.get(
+            "concept_brief"
+        )
+    )
+    evidence_summary = _sanitize_learning_text(
+        question.get(
+            "evidence_summary"
+        )
+    )
+    evidence_context = _sanitize_learning_text(
+        question.get(
+            "evidence_context"
+        )
+    )
+    evidence_help = _sanitize_learning_text(
+        question.get(
+            "evidence_help"
+        )
+    )
+
+    responses = [
+        (
+            concept_brief
+            or evidence_help
+            or "문제에서 반복되는 핵심 용어와 조건을 먼저 한 문장으로 묶어보자."
         ),
-        question=question,
-        guide_name=guide_name,
-        section=ACTION_COMPANION,
+        (
+            evidence_help
+            or evidence_summary
+            or "문제에서 직접 주어진 값과 비교해야 하는 조건부터 표시해보자."
+        ),
+        (
+            (
+                f"{evidence_summary} "
+                "이 단서가 다른 정보와 어디에서 어긋나는지 비교해보면 좋아."
+            ).strip()
+            if evidence_summary
+            else (
+                "서로 같은 기준으로 비교되고 있는지, 빠진 조건은 없는지 확인해보자."
+            )
+        ),
+        (
+            " / ".join(
+                item
+                for item in (
+                    evidence_summary,
+                    evidence_context,
+                )
+                if item
+            )
+            or "확인한 정보와 아직 확인하지 않은 정보를 나눠 적어보자."
+        ),
+        (
+            "정답을 바로 고르기보다, 각 선택지가 맞다고 가정했을 때 "
+            "현재 단서와 충돌하는 부분이 있는지 하나씩 지워보자."
+        ),
+    ]
+
+    selected_prompt = max(
+        0,
+        min(
+            selected_prompt,
+            len(prompts) - 1,
+        ),
+    )
+
+    portrait_col, talk_col = st.columns(
+        [0.34, 0.66],
+        gap="medium",
+    )
+
+    with portrait_col:
+        st.markdown(
+            '<div class="v3-panel-title">'
+            '<span>🐾</span>'
+            f'<span><strong>{html.escape(format_inline_text(guide_name))}와의 대화</strong>'
+            '<small>궁금한 것을 선택하면 저장된 학습 도움으로 함께 생각합니다.</small></span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        portrait_path = resolve_portrait(
+            world[4],
+            "companion",
+            character_id="default",
+        )
+        if portrait_path is not None:
+            st.image(
+                str(portrait_path),
+                use_container_width=True,
+            )
+
+        _render_character_interaction(
+            theme=world[4],
+            speaker_type="companion",
+            speaker_name=guide_name,
+            message=(
+                "어떤 부분이 가장 궁금해? "
+                "정답을 바로 말하기보다 같이 단서를 정리해보자."
+            ),
+            tone="neutral",
+        )
+
+    with talk_col:
+        st.markdown(
+            '<div class="v3-companion-progress">'
+            f'현재 문제 · {index + 1} / {len(questions)}'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        prompt_columns = st.columns(
+            2,
+            gap="small",
+        )
+
+        for prompt_index, prompt in enumerate(
+            prompts
+        ):
+            with prompt_columns[
+                prompt_index % 2
+            ]:
+                if st.button(
+                    f"💬 {prompt}",
+                    key=(
+                        f"v3_companion_prompt_btn_"
+                        f"{chapter[0]}_{index}_{prompt_index}"
+                    ),
+                    type=(
+                        "primary"
+                        if prompt_index
+                        == selected_prompt
+                        else "secondary"
+                    ),
+                    use_container_width=True,
+                ):
+                    st.session_state[
+                        prompt_key
+                    ] = prompt_index
+                    selected_prompt = (
+                        prompt_index
+                    )
+
+        safe_guide_name = html.escape(
+            format_inline_text(
+                guide_name
+            )
+        )
+        safe_response = html.escape(
+            format_inline_text(
+                responses[
+                    selected_prompt
+                ]
+            )
+        )
+        st.markdown(
+            '<section class="v3-companion-hint-card">'
+            '<div class="v3-companion-hint-title">'
+            f'{safe_guide_name}의 힌트'
+            '</div>'
+            '<div class="v3-companion-hint-copy">'
+            f'{safe_response}'
+            '</div>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+
+        if evidence_summary:
+            st.markdown(
+                '<div class="v3-companion-evidence-line">'
+                '<span>현재 확인된 단서</span>'
+                '<strong>'
+                + html.escape(
+                    format_inline_text(
+                        evidence_summary
+                    )
+                )
+                + '</strong>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+
+
+
+
+# V3_ONE_SCREEN_PLAY_LAYOUT_V1_20260908
+def _inject_v3_one_screen_play_layout_css(
+    *,
+    world_id: int,
+    chapter_id: int,
+    theme: str,
+    chapter_number: int,
+) -> None:
+    """Game-like V3 viewport shell with a persistent HUD/body/dock grid."""
+    surface_class = f".st-key-v3_play_surface_{int(world_id)}_{int(chapter_id)}"
+    header_class = f".st-key-v3_play_header_{int(world_id)}_{int(chapter_id)}"
+    body_class = f".st-key-v3_play_body_{int(world_id)}_{int(chapter_id)}"
+    dock_class = f".st-key-v3_play_dock_{int(world_id)}_{int(chapter_id)}"
+
+    background_path = _v3_context_image_path(
+        theme=theme,
+        chapter_number=chapter_number,
+    )
+    background_uri = _v3_file_data_uri(
+        background_path
+    )
+    shell_background = (
+        f'linear-gradient(rgba(5,14,24,.34),rgba(5,14,24,.48)),url("{background_uri}") center/cover fixed'
+        if background_uri
+        else 'linear-gradient(135deg,#071522,#10283a)'
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        /* V3_GAME_UI_ALIGNMENT_V2_20260908 */
+        @media (min-width:900px) and (min-height:650px) {{
+            html, body, .stApp,
+            div[data-testid="stAppViewContainer"],
+            section[data-testid="stMain"] {{
+                height:100dvh !important;
+                max-height:100dvh !important;
+                overflow:hidden !important;
+            }}
+
+            header[data-testid="stHeader"],
+            #MainMenu, footer, [data-testid="stDecoration"] {{
+                display:none !important;
+            }}
+
+            div[data-testid="stMainBlockContainer"]:has({surface_class}),
+            .main .block-container:has({surface_class}) {{
+                width:100% !important;
+                max-width:none !important;
+                height:100dvh !important;
+                max-height:100dvh !important;
+                overflow:hidden !important;
+                box-sizing:border-box !important;
+                padding:.35rem .6rem .4rem !important;
+                background:{shell_background} !important;
+            }}
+
+            {surface_class} {{
+                height:calc(100dvh - .75rem) !important;
+                max-height:calc(100dvh - .75rem) !important;
+                min-height:0 !important;
+                overflow:hidden !important;
+                margin:0 !important;
+                padding:0 !important;
+            }}
+
+            {surface_class} > div[data-testid="stVerticalBlock"] {{
+                display:grid !important;
+                grid-template-rows:auto minmax(0,1fr) auto !important;
+                height:100% !important;
+                min-height:0 !important;
+                gap:.28rem !important;
+            }}
+
+            /* Streamlit wraps keyed containers in stElementContainer nodes.
+               Those wrappers must also be shrinkable or the Body's intrinsic
+               content height pushes the Action Dock below the viewport. */
+            {surface_class} > div[data-testid="stVerticalBlock"]
+            > div[data-testid="stElementContainer"] {{
+                min-height:0 !important;
+                margin:0 !important;
+            }}
+            {surface_class} > div[data-testid="stVerticalBlock"]
+            > div[data-testid="stElementContainer"]:has({body_class}) {{
+                height:100% !important;
+                overflow:hidden !important;
+            }}
+            {surface_class} > div[data-testid="stVerticalBlock"]
+            > div[data-testid="stElementContainer"]:has({dock_class}) {{
+                align-self:end !important;
+            }}
+
+            div[data-testid="stMainBlockContainer"]:has({surface_class})
+            > div[data-testid="stVerticalBlock"] {{
+                min-height:0 !important;
+                gap:0 !important;
+                padding-top:0 !important;
+            }}
+
+            {header_class},
+            {body_class},
+            {dock_class} {{
+                min-height:0 !important;
+                margin:0 !important;
+            }}
+
+            {header_class} > div[data-testid="stVerticalBlock"] {{
+                gap:.18rem !important;
+            }}
+
+            {header_class} div[data-testid="stHorizontalBlock"] {{
+                gap:.38rem !important;
+                align-items:center !important;
+            }}
+
+            {header_class} div[data-testid="stButton"] > button {{
+                min-height:2.35rem !important;
+                height:2.35rem !important;
+                padding:.2rem .42rem !important;
+                border-radius:8px !important;
+                border:1px solid rgba(255,255,255,.16) !important;
+                background:rgba(7,20,34,.72) !important;
+                color:#eaf2fb !important;
+                font-size:.66rem !important;
+            }}
+
+            {header_class} [data-testid="stCaptionContainer"] {{
+                display:none !important;
+            }}
+
+            {body_class} {{
+                height:100% !important;
+                max-height:none !important;
+                overflow:hidden !important;
+                border:1px solid rgba(255,255,255,.12) !important;
+                border-radius:18px !important;
+                background:rgba(6,17,29,.58) !important;
+                backdrop-filter:blur(5px);
+                -webkit-backdrop-filter:blur(5px);
+                box-shadow:0 18px 46px rgba(0,0,0,.18);
+            }}
+
+            {body_class} > div[data-testid="stVerticalBlock"] {{
+                height:100% !important;
+                max-height:100% !important;
+                min-height:0 !important;
+                overflow-y:auto !important;
+                overflow-x:hidden !important;
+                gap:.42rem !important;
+                padding:.55rem .65rem .6rem !important;
+                box-sizing:border-box !important;
+                overscroll-behavior:contain;
+            }}
+
+            {body_class} .v3-mode-heading,
+            {body_class} .v3-panel-title {{
+                color:#f4f7fb !important;
+                margin:0 0 .35rem !important;
+            }}
+            {body_class} .v3-mode-heading small,
+            {body_class} .v3-panel-title small {{ color:#aebdcc !important; }}
+
+            {body_class} div[data-testid="stHorizontalBlock"] {{
+                gap:.58rem !important;
+                align-items:stretch !important;
+            }}
+
+            {body_class} div[data-testid="column"] {{
+                min-width:0 !important;
+            }}
+
+            {body_class} [data-testid="stVerticalBlockBorderWrapper"] {{
+                border-color:rgba(255,255,255,.12) !important;
+                background:rgba(7,19,31,.76) !important;
+                border-radius:14px !important;
+                box-shadow:none !important;
+            }}
+
+            /* V3_QUIZ_EVIDENCE_VISUAL_CONTRACT_FIX_V3_1_20260908
+               Evidence is now one owned HTML surface. It no longer depends
+               on :has(...) traversing Streamlit's generated border wrappers. */
+            {body_class} .v3-evidence-card {{
+                max-height:285px !important;
+                overflow-y:auto !important;
+                overflow-x:hidden !important;
+                box-sizing:border-box !important;
+                margin:0 !important;
+                padding:.72rem .78rem .8rem !important;
+                border:1px solid rgba(193,211,229,.22) !important;
+                border-radius:14px !important;
+                background:linear-gradient(
+                    145deg,
+                    rgba(7,20,33,.97),
+                    rgba(11,29,44,.94)
+                ) !important;
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                box-shadow:inset 0 1px 0 rgba(255,255,255,.04) !important;
+                scrollbar-width:thin;
+            }}
+
+            {body_class} .v3-evidence-card,
+            {body_class} .v3-evidence-card * {{
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                opacity:1 !important;
+            }}
+
+            {body_class} .v3-evidence-kicker {{
+                margin:0 0 .18rem !important;
+                color:#ef5966 !important;
+                -webkit-text-fill-color:#ef5966 !important;
+                font-size:.58rem !important;
+                line-height:1.2 !important;
+                font-weight:950 !important;
+                letter-spacing:.14em !important;
+            }}
+
+            {body_class} .v3-evidence-task {{
+                margin:0 0 .55rem !important;
+                color:#cbd8e6 !important;
+                -webkit-text-fill-color:#cbd8e6 !important;
+                font-size:.72rem !important;
+                line-height:1.35 !important;
+                font-weight:700 !important;
+            }}
+
+            {body_class} .v3-evidence-heading {{
+                margin:.48rem 0 .14rem !important;
+                color:#ffffff !important;
+                -webkit-text-fill-color:#ffffff !important;
+                font-size:.78rem !important;
+                line-height:1.3 !important;
+                font-weight:900 !important;
+            }}
+
+            {body_class} .v3-evidence-copy,
+            {body_class} .v3-evidence-empty {{
+                margin:0 !important;
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                font-size:.75rem !important;
+                line-height:1.52 !important;
+                font-weight:620 !important;
+                word-break:keep-all !important;
+                overflow-wrap:break-word !important;
+            }}
+
+            {body_class} .v3-evidence-empty {{
+                color:#b9c8d7 !important;
+                -webkit-text-fill-color:#b9c8d7 !important;
+            }}
+
+            {body_class} [data-testid="stImage"] img {{
+                width:100% !important;
+                max-height:145px !important;
+                object-fit:cover !important;
+                border-radius:13px !important;
+                border:1px solid rgba(255,255,255,.12) !important;
+            }}
+
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] {{ gap:.28rem !important; }}
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] > label {{
+                padding:.48rem .62rem !important;
+                min-height:2.55rem !important;
+                border:1px solid rgba(255,255,255,.16) !important;
+                border-radius:10px !important;
+                background:rgba(7,19,31,.82) !important;
+                color:#eef4fb !important;
+            }}
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] > label p {{
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                font-size:.78rem !important;
+                line-height:1.35 !important;
+            }}
+
+            {body_class} div[data-testid="stButton"] > button {{
+                min-height:2.45rem !important;
+                border-radius:10px !important;
+                font-size:.76rem !important;
+                font-weight:800 !important;
+            }}
+
+            {dock_class} {{
+                padding:.46rem .5rem .5rem !important;
+                border:1px solid rgba(255,255,255,.14) !important;
+                border-radius:15px !important;
+                background:rgba(7,19,31,.88) !important;
+                box-shadow:0 14px 34px rgba(0,0,0,.26) !important;
+                backdrop-filter:blur(15px) saturate(125%) !important;
+                -webkit-backdrop-filter:blur(15px) saturate(125%) !important;
+            }}
+            {dock_class} > div[data-testid="stVerticalBlock"] {{ gap:.22rem !important; }}
+            {dock_class} div[data-testid="stHorizontalBlock"] {{ gap:.42rem !important; }}
+            {dock_class} div[data-testid="stButton"] > button,
+            {dock_class} div[data-testid="stPopover"] button {{
+                width:100% !important;
+                min-height:2.82rem !important;
+                padding:.34rem .38rem !important;
+                border-radius:11px !important;
+                border:1px solid rgba(255,255,255,.16) !important;
+                background:rgba(255,255,255,.055) !important;
+                color:#edf4fb !important;
+                font-size:.70rem !important;
+                line-height:1.22 !important;
+                font-weight:850 !important;
+                white-space:pre-line !important;
+            }}
+            {dock_class} div[data-testid="stButton"] > button[kind="primary"] {{
+                background:color-mix(in srgb,var(--learn-accent) 26%,rgba(10,28,44,.94)) !important;
+                border-color:color-mix(in srgb,var(--learn-accent) 55%,transparent) !important;
+                box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--learn-accent) 18%,transparent) !important;
+            }}
+
+            .v3-question-card {{
+                position:relative;
+                margin:0 0 .42rem;
+                padding:.72rem .82rem .78rem;
+                border:1px solid rgba(255,255,255,.15);
+                border-radius:14px;
+                background:linear-gradient(135deg,rgba(9,24,39,.94),rgba(13,31,47,.92));
+                box-shadow:0 12px 28px rgba(0,0,0,.18);
+                color:#f4f7fb;
+            }}
+            .v3-question-kicker {{ color:var(--learn-accent); font-size:.60rem; font-weight:900; letter-spacing:.13em; }}
+            .v3-question-progress {{ position:absolute; top:.66rem; right:.76rem; color:#aebdcc; font-size:.62rem; font-weight:800; }}
+            .v3-question-text {{ margin-top:.34rem; font-size:clamp(1rem,1.28vw,1.22rem); line-height:1.42; font-weight:850; letter-spacing:-.02em; }}
+
+            /* V3_REVIEW_COMPANION_VISUAL_FIX_V3_2_20260908
+               Review Stage uses an explicit viewport-safe height and keeps the
+               dialogue card in normal flex flow. This avoids Streamlit wrapper
+               height collapse clipping the dialogue at the top edge. */
+            {body_class} div[data-testid="stElementContainer"]:has(.v3-review-stage-v32),
+            {body_class} [data-testid="stMarkdownContainer"]:has(.v3-review-stage-v32) {{
+                min-height:clamp(280px,41vh,380px) !important;
+                height:auto !important;
+                overflow:visible !important;
+            }}
+
+            .v3-review-stage {{
+                position:relative;
+                height:100%;
+                min-height:310px;
+                max-height:430px;
+                overflow:hidden;
+                border-radius:15px;
+                border:1px solid rgba(255,255,255,.14);
+                background-size:cover;
+                background-position:center;
+                box-shadow:0 16px 36px rgba(0,0,0,.24);
+            }}
+            .v3-review-stage::before {{ content:""; position:absolute; inset:0; background:linear-gradient(to bottom,rgba(3,9,16,.08),rgba(3,9,16,.62)); }}
+            .v3-review-character {{ position:absolute; z-index:2; left:1rem; bottom:86px; width:145px; height:190px; opacity:1; filter:drop-shadow(0 12px 18px rgba(0,0,0,.38)); }}
+            .v3-review-character img {{ width:100%; height:100%; object-fit:contain; object-position:center bottom; opacity:1; transition:opacity .2s ease,filter .2s ease; }}
+            .v3-review-character.is-active img {{ opacity:1 !important; filter:none !important; }}
+            .v3-review-character.is-dim img {{ opacity:.28 !important; filter:saturate(.60) brightness(.74) !important; }}
+            .v3-review-dialogue {{ position:absolute; z-index:3; left:.7rem; right:.7rem; bottom:.7rem; min-height:82px; padding:.6rem .74rem .65rem; border-radius:13px; background:rgba(247,249,252,.95); color:#1f4b7e; box-shadow:0 12px 28px rgba(0,0,0,.25); }}
+            .v3-review-speaker {{ display:inline-block; margin-top:-1.25rem; padding:.25rem .68rem; border-radius:8px; background:#d8eaff; color:#24598f; font-size:.70rem; font-weight:900; }}
+            .v3-review-scene-label {{ margin:.18rem 0 .16rem; color:#71839a; font-size:.55rem; font-weight:900; letter-spacing:.12em; }}
+            .v3-review-text {{ font-size:.82rem; line-height:1.45; font-weight:650; }}
+
+            .v3-review-stage.v3-review-stage-v32 {{
+                display:flex !important;
+                flex-direction:column !important;
+                justify-content:flex-end !important;
+                width:100% !important;
+                height:clamp(280px,41vh,380px) !important;
+                min-height:280px !important;
+                max-height:380px !important;
+                box-sizing:border-box !important;
+                isolation:isolate !important;
+                overflow:hidden !important;
+                background-color:#07131f !important;
+            }}
+            .v3-review-stage-v32::before {{
+                z-index:1 !important;
+                pointer-events:none !important;
+            }}
+            .v3-review-stage-v32 .v3-review-character-v32 {{
+                left:.9rem !important;
+                bottom:92px !important;
+                width:138px !important;
+                height:182px !important;
+            }}
+            .v3-review-stage-v32 .v3-review-dialogue-v32 {{
+                position:relative !important;
+                z-index:3 !important;
+                left:auto !important;
+                right:auto !important;
+                bottom:auto !important;
+                width:auto !important;
+                margin:.68rem !important;
+                min-height:82px !important;
+                box-sizing:border-box !important;
+                flex:0 0 auto !important;
+            }}
+            .v3-review-stage-v32 .v3-review-dialogue-v32,
+            .v3-review-stage-v32 .v3-review-dialogue-v32 * {{
+                opacity:1 !important;
+            }}
+            .v3-review-stage-v32 .v3-review-text {{
+                color:#173d68 !important;
+                -webkit-text-fill-color:#173d68 !important;
+            }}
+
+            .v3-review-scene-list-title {{
+                margin:0 0 .42rem !important;
+                color:#f4f7fb !important;
+                -webkit-text-fill-color:#f4f7fb !important;
+                font-size:.78rem !important;
+                line-height:1.25 !important;
+                font-weight:900 !important;
+            }}
+
+            .v3-review-side-stack {{
+                display:grid !important;
+                grid-template-rows:minmax(0,1fr) auto !important;
+                gap:.58rem !important;
+                min-height:0 !important;
+            }}
+            .v3-review-side-card {{
+                box-sizing:border-box !important;
+                margin:0 !important;
+                padding:.72rem .78rem !important;
+                border:1px solid rgba(193,211,229,.20) !important;
+                border-radius:14px !important;
+                background:linear-gradient(145deg,rgba(7,20,33,.96),rgba(11,29,44,.93)) !important;
+                color:#edf4fb !important;
+                -webkit-text-fill-color:#edf4fb !important;
+                overflow:hidden !important;
+            }}
+            .v3-review-side-card,
+            .v3-review-side-card * {{
+                color:#edf4fb !important;
+                -webkit-text-fill-color:#edf4fb !important;
+                opacity:1 !important;
+            }}
+            .v3-review-clue-card {{
+                max-height:245px !important;
+                overflow-y:auto !important;
+                scrollbar-width:thin;
+            }}
+            .v3-review-side-title {{
+                margin:0 0 .48rem !important;
+                color:#ffffff !important;
+                -webkit-text-fill-color:#ffffff !important;
+                font-size:.82rem !important;
+                line-height:1.25 !important;
+                font-weight:950 !important;
+            }}
+            .v3-review-side-list {{
+                margin:0 !important;
+                padding-left:1.05rem !important;
+            }}
+            .v3-review-side-list li {{
+                margin:.1rem 0 .52rem !important;
+                color:#dfeaf5 !important;
+                -webkit-text-fill-color:#dfeaf5 !important;
+                font-size:.74rem !important;
+                line-height:1.48 !important;
+                font-weight:620 !important;
+            }}
+            .v3-review-side-empty {{
+                color:#b9c8d7 !important;
+                -webkit-text-fill-color:#b9c8d7 !important;
+                font-size:.73rem !important;
+                line-height:1.45 !important;
+            }}
+            .v3-review-keyword-wrap {{
+                display:flex !important;
+                flex-wrap:wrap !important;
+                gap:.35rem !important;
+            }}
+            .v3-review-keyword-chip {{
+                display:inline-flex !important;
+                align-items:center !important;
+                min-height:1.55rem !important;
+                padding:.18rem .48rem !important;
+                border:1px solid rgba(239,89,102,.26) !important;
+                border-radius:999px !important;
+                background:rgba(239,89,102,.10) !important;
+                color:#f5dfe3 !important;
+                -webkit-text-fill-color:#f5dfe3 !important;
+                font-size:.66rem !important;
+                line-height:1.2 !important;
+                font-weight:760 !important;
+            }}
+
+            .v3-companion-progress {{
+                margin:0 0 .42rem !important;
+                color:#b9c8d7 !important;
+                -webkit-text-fill-color:#b9c8d7 !important;
+                font-size:.70rem !important;
+                line-height:1.25 !important;
+                font-weight:760 !important;
+            }}
+            .v3-companion-hint-card {{
+                box-sizing:border-box !important;
+                margin:.48rem 0 0 !important;
+                padding:.78rem .86rem .82rem !important;
+                border:1px solid rgba(214,184,116,.25) !important;
+                border-radius:14px !important;
+                background:linear-gradient(145deg,rgba(16,25,36,.96),rgba(19,31,43,.94)) !important;
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                box-shadow:inset 3px 0 0 rgba(220,184,105,.72) !important;
+            }}
+            .v3-companion-hint-card,
+            .v3-companion-hint-card * {{
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                opacity:1 !important;
+            }}
+            .v3-companion-hint-title {{
+                margin:0 0 .38rem !important;
+                color:#f0cf83 !important;
+                -webkit-text-fill-color:#f0cf83 !important;
+                font-size:.82rem !important;
+                line-height:1.25 !important;
+                font-weight:950 !important;
+            }}
+            .v3-companion-hint-copy {{
+                margin:0 !important;
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                font-size:.80rem !important;
+                line-height:1.52 !important;
+                font-weight:650 !important;
+                word-break:keep-all !important;
+                overflow-wrap:break-word !important;
+            }}
+            .v3-companion-evidence-line {{
+                display:grid !important;
+                gap:.18rem !important;
+                margin:.52rem 0 0 !important;
+                padding:.52rem .66rem !important;
+                border:1px solid rgba(193,211,229,.15) !important;
+                border-radius:10px !important;
+                background:rgba(7,19,31,.64) !important;
+            }}
+            .v3-companion-evidence-line span {{
+                color:#9fb2c5 !important;
+                -webkit-text-fill-color:#9fb2c5 !important;
+                font-size:.62rem !important;
+                line-height:1.2 !important;
+                font-weight:850 !important;
+                letter-spacing:.03em !important;
+            }}
+            .v3-companion-evidence-line strong {{
+                color:#dfeaf5 !important;
+                -webkit-text-fill-color:#dfeaf5 !important;
+                font-size:.72rem !important;
+                line-height:1.42 !important;
+                font-weight:650 !important;
+            }}
+
+            .v3-story-choice-heading {{
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:.7rem;
+                margin:.2rem 0 .34rem;
+                padding:.58rem .72rem;
+                border:1px solid rgba(255,255,255,.14);
+                border-radius:12px;
+                background:rgba(7,19,31,.82);
+                color:#f2f6fb;
+            }}
+            .v3-story-choice-heading strong {{ font-size:.86rem; }}
+            .v3-story-choice-heading span {{ color:#aebdcc; font-size:.68rem; }}
+        }}
+
+        @media (max-width:899px), (max-height:649px) {{
+            {surface_class}, {body_class} {{ height:auto !important; max-height:none !important; overflow:visible !important; }}
+            {surface_class} > div[data-testid="stVerticalBlock"] {{ display:flex !important; height:auto !important; }}
+            {body_class} > div[data-testid="stVerticalBlock"] {{ overflow:visible !important; }}
+            .v3-review-stage {{ min-height:360px; }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 
-def render_learning_tab(
+
+
+def _render_post_story_mode_body(
+    *,
     user,
     world,
-):
-    chapter = get_runtime_chapter(
-        world_id=world[0],
-        chapter_number=world[7],
-    )
-
-    if chapter is None:
-        if is_ai_mock_enabled():
-            st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
-        st.warning(
-            "현재 Chapter가 아직 준비되지 않았습니다."
-        )
-
-        st.caption(
-            "AI 생성이 중간에 실패했더라도 World, Story Arc, "
-            "고양이 이름은 유지됩니다. 저장된 상태에서 다시 생성할 수 있습니다."
-        )
-
-        if st.button(
-            "첫 Story Outline + Chapter 1 생성 다시 시도",
-            type="primary",
-            key=(
-                f"retry_story_block_"
-                f"{world[0]}"
-            ),
-            use_container_width=True,
-        ):
-            with st.spinner(
-                "Curriculum, Blueprint, 첫 Story Outline을 확인하고 Chapter 1만 준비하고 있습니다..."
-            ):
-                try:
-                    ensure_initial_story_block(
-                        user=user,
-                        world=world,
-                    )
-
-                    invalidate_runtime_world(
-                        world[0]
-                    )
-
-                    update_current_chapter(
-                        world_id=world[0],
-                        chapter_number=1,
-                    )
-
-                    reset_quiz_state()
-                    st.rerun()
-
-                except AIQuotaExhausted:
-                    st.error(
-                        "Gemini의 일일 무료 요청 할당량이 소진되었습니다. "
-                        "자동 재시도는 중단했습니다. 할당량이 갱신된 뒤 다시 시도해주세요."
-                    )
-
-                except Exception as exc:
-                    traceback.print_exc()
-                    st.error(
-                        "첫 Story Outline 또는 Chapter 1 생성에 실패했습니다. "
-                        "이미 성공한 Curriculum/Blueprint 단계는 유지되며 "
-                        "실패한 단계부터 다시 시도할 수 있습니다."
-                    )
-                    st.caption(
-                        f"개발용 오류 유형: {type(exc).__name__} · "
-                        "상세 내용은 터미널과 AI Generation Log를 확인해주세요."
-                    )
-
-        return
-
-    # V3_PLAY_MODE_STATE_CORE_V1_20260908
-    # Story의 최초 재생 여부를 play_mode state machine의 강제 진입 조건으로 사용한다.
-    # 아직 Action Hub를 노출하지 않으므로 review/companion은 상태 계약만 예약하고
-    # 기존 visible UI는 story -> quiz 흐름을 그대로 유지한다.
-    story_pending = (
-        should_render_dialogue_story(
-            chapter_id=chapter[0],
-            story_text=chapter[4],
-        )
-        or should_render_story_cinematic(
-            chapter_id=chapter[0],
-            story_text=chapter[4],
-        )
-    )
-
-    play_mode = resolve_play_mode(
-        world_id=world[0],
-        chapter_id=chapter[0],
-        story_pending=story_pending,
-    )
-
-    # Dedicated Story presentation 중에는 mock caption을 포함한 다른 학습 UI를 먼저 렌더하지 않는다.
-    if play_mode == PLAY_MODE_STORY:
+    chapter,
+    play_mode: str,
+) -> None:
+    if play_mode == PLAY_MODE_REVIEW:
+        # Preserve Story open analytics/runtime semantics without rendering
+        # the old expander-based review tools.
         _render_chapter_story(
             user=user,
             world=world,
             chapter=chapter,
+            review_expanded=False,
+            render_header=False,
+            render_tools=False,
         )
-        return
-
-    if is_ai_mock_enabled():
-        st.caption(f"🧪 {generation_mode_label()} · Gemini 호출 없이 기능 흐름을 테스트 중입니다.")
-
-    # V3_ACTION_HUB_V1_20260908
-    # Hub click은 play_mode session state만 바꾸며 DB/Gemini 작업을 직접 수행하지 않는다.
-    guide_name = (
-        world[9]
-        if len(world) > 9
-        and world[9]
-        else "고양이"
-    )
-    render_play_action_hub(
-        world_id=world[0],
-        chapter_id=chapter[0],
-        active_mode=play_mode,
-        guide_name=guide_name,
-    )
-
-    cinematic_active = _render_chapter_story(
-        user=user,
-        world=world,
-        chapter=chapter,
-        review_expanded=(
-            play_mode
-            == PLAY_MODE_REVIEW
-        ),
-    )
-
-    if cinematic_active:
-        return
-
-    if play_mode == PLAY_MODE_REVIEW:
+        _render_v3_story_review_panel(
+            world=world,
+            chapter=chapter,
+        )
         return
 
     if play_mode == PLAY_MODE_COMPANION:
@@ -2684,20 +3850,31 @@ def render_learning_tab(
                 )
             )
 
-            support_profile = get_learner_level_profile(world[3])
-            reasoning_profile = get_reasoning_profile(requested_difficulty)
+            support_profile = get_learner_level_profile(
+                world[3]
+            )
+            reasoning_profile = get_reasoning_profile(
+                requested_difficulty
+            )
             adaptive_support = get_adaptive_support_profile(
                 user_id=user["user_id"],
                 world_id=world[0],
                 target_concepts=targets,
             )
-            st.caption(
-                f"학습 지원 · {support_profile['display_name']} · "
-                f"현재 사고 난이도 · {reasoning_profile['label']}"
+
+            info_left, info_right = st.columns(
+                2,
+                gap="small",
             )
-            st.caption(
-                f"개인화 · {adaptive_support['label']}"
-            )
+            with info_left:
+                st.caption(
+                    f"학습 지원 · {support_profile['display_name']} · "
+                    f"사고 난이도 · {reasoning_profile['label']}"
+                )
+            with info_right:
+                st.caption(
+                    f"개인화 · {adaptive_support['label']}"
+                )
 
             interaction_context = get_chapter_interaction_context(
                 world_id=world[0],
@@ -2705,14 +3882,20 @@ def render_learning_tab(
                 theme=world[4],
             )
 
-            experience_profile = get_theme_experience_profile(world[4])
+            experience_profile = get_theme_experience_profile(
+                world[4]
+            )
             st.caption(
                 f"이번 {experience_profile['interaction_noun']} · "
                 f"{interaction_context.get('label') or '상황 적용'}"
             )
 
-            prepare_label = experience_profile["prepare_label"].format(
-                count=QUESTION_COUNT
+            prepare_label = (
+                experience_profile[
+                    "prepare_label"
+                ].format(
+                    count=QUESTION_COUNT
+                )
             )
 
             if st.button(
@@ -2724,23 +3907,27 @@ def render_learning_tab(
                 ),
                 use_container_width=True,
             ):
-                context = (
-                    get_story_context(
-                        world[0]
-                    )
+                context = get_story_context(
+                    world[0]
                 )
                 foundation = get_world_foundation(
                     world[0]
                 )
                 concept_contracts = get_concept_contracts(
                     curriculum=(
-                        (foundation or {}).get("curriculum")
+                        (foundation or {}).get(
+                            "curriculum"
+                        )
                     ),
                     target_concepts=targets,
                 )
 
-                spinner_text = experience_profile["spinner_label"].format(
-                    count=QUESTION_COUNT
+                spinner_text = (
+                    experience_profile[
+                        "spinner_label"
+                    ].format(
+                        count=QUESTION_COUNT
+                    )
                 )
 
                 with st.spinner(
@@ -2750,31 +3937,15 @@ def render_learning_tab(
                         generated_questions = (
                             generate_chapter_questions(
                                 topic=world[1],
-                                learner_level=(
-                                    world[3]
-                                ),
+                                learner_level=world[3],
                                 theme=world[4],
-                                chapter_title=(
-                                    chapter[3]
-                                ),
-                                chapter_story=(
-                                    chapter[4]
-                                ),
-                                learning_objectives=(
-                                    chapter[5]
-                                ),
-                                target_concepts=(
-                                    targets
-                                ),
-                                concept_contracts=(
-                                    concept_contracts
-                                ),
-                                requested_difficulty=(
-                                    requested_difficulty
-                                ),
-                                adaptive_support=(
-                                    adaptive_support
-                                ),
+                                chapter_title=chapter[3],
+                                chapter_story=chapter[4],
+                                learning_objectives=chapter[5],
+                                target_concepts=targets,
+                                concept_contracts=concept_contracts,
+                                requested_difficulty=requested_difficulty,
+                                adaptive_support=adaptive_support,
                                 guide_name=(
                                     world[9]
                                     if len(world) > 9
@@ -2792,12 +3963,17 @@ def render_learning_tab(
                                 ),
                                 chapter_number=chapter[2],
                                 target_chapter_count=(
-                                    context["arc"].get("target_chapter_count")
+                                    context["arc"].get(
+                                        "target_chapter_count"
+                                    )
                                     if context
                                     else None
                                 ),
                                 current_open_threads=(
-                                    (context.get("state") or {}).get("open_threads", [])
+                                    (context.get("state") or {}).get(
+                                        "open_threads",
+                                        [],
+                                    )
                                     if context
                                     else []
                                 ),
@@ -2806,9 +3982,7 @@ def render_learning_tab(
                                 ],
                                 world_id=world[0],
                                 story_arc_id=(
-                                    context[
-                                        "arc"
-                                    ]["id"]
+                                    context["arc"]["id"]
                                     if context
                                     else None
                                 ),
@@ -2816,12 +3990,8 @@ def render_learning_tab(
                         )
 
                         update_chapter_questions(
-                            chapter_id=(
-                                chapter[0]
-                            ),
-                            questions=(
-                                generated_questions
-                            ),
+                            chapter_id=chapter[0],
+                            questions=generated_questions,
                         )
 
                         invalidate_runtime_chapter(
@@ -2850,6 +4020,239 @@ def render_learning_tab(
         world=world,
         chapter=chapter,
     )
+
+
+
+def render_learning_tab(
+    user,
+    world,
+):
+    chapter = get_runtime_chapter(
+        world_id=world[0],
+        chapter_number=world[7],
+    )
+
+    if chapter is None:
+        if is_ai_mock_enabled():
+            st.caption(
+                f"🧪 {generation_mode_label()} · "
+                "Gemini 호출 없이 기능 흐름을 테스트 중입니다."
+            )
+
+        st.warning(
+            "현재 Chapter가 아직 준비되지 않았습니다."
+        )
+        st.caption(
+            "AI 생성이 중간에 실패했더라도 World, Story Arc, "
+            "고양이 이름은 유지됩니다. 저장된 상태에서 다시 생성할 수 있습니다."
+        )
+
+        if st.button(
+            "첫 Story Outline + Chapter 1 생성 다시 시도",
+            type="primary",
+            key=(
+                f"retry_story_block_"
+                f"{world[0]}"
+            ),
+            use_container_width=True,
+        ):
+            with st.spinner(
+                "Curriculum, Blueprint, 첫 Story Outline을 확인하고 Chapter 1만 준비하고 있습니다..."
+            ):
+                try:
+                    ensure_initial_story_block(
+                        user=user,
+                        world=world,
+                    )
+
+                    invalidate_runtime_world(
+                        world[0]
+                    )
+
+                    update_current_chapter(
+                        world_id=world[0],
+                        chapter_number=1,
+                    )
+
+                    reset_quiz_state()
+                    st.rerun()
+
+                except AIQuotaExhausted:
+                    st.error(
+                        "Gemini의 일일 무료 요청 할당량이 소진되었습니다. "
+                        "자동 재시도는 중단했습니다. 할당량이 갱신된 뒤 다시 시도해주세요."
+                    )
+
+                except Exception as exc:
+                    traceback.print_exc()
+                    st.error(
+                        "첫 Story Outline 또는 Chapter 1 생성에 실패했습니다. "
+                        "이미 성공한 Curriculum/Blueprint 단계는 유지되며 "
+                        "실패한 단계부터 다시 시도할 수 있습니다."
+                    )
+                    st.caption(
+                        f"개발용 오류 유형: {type(exc).__name__} · "
+                        "상세 내용은 터미널과 AI Generation Log를 확인해주세요."
+                    )
+
+        return
+
+    story_pending = (
+        should_render_dialogue_story(
+            chapter_id=chapter[0],
+            story_text=chapter[4],
+        )
+        or should_render_story_cinematic(
+            chapter_id=chapter[0],
+            story_text=chapter[4],
+        )
+    )
+
+    play_mode = resolve_play_mode(
+        world_id=world[0],
+        chapter_id=chapter[0],
+        story_pending=story_pending,
+    )
+
+    # First-time Story still owns the dedicated cinematic/dialogue screen.
+    # Skip means "mark Story seen -> enter the normal V3 play shell", not an
+    # old-layout branch.
+    if play_mode == PLAY_MODE_STORY:
+        _render_chapter_story(
+            user=user,
+            world=world,
+            chapter=chapter,
+        )
+        return
+
+    guide_name = (
+        world[9]
+        if len(world) > 9
+        and world[9]
+        else "고양이"
+    )
+
+    targets = (
+        chapter[
+            CHAPTER_TARGET_CONCEPTS
+        ]
+        if len(chapter)
+        > CHAPTER_TARGET_CONCEPTS
+        else []
+    )
+
+    _inject_v3_one_screen_play_layout_css(
+        world_id=world[0],
+        chapter_id=chapter[0],
+        theme=world[4],
+        chapter_number=chapter[2],
+    )
+
+    surface_key = (
+        f"v3_play_surface_"
+        f"{int(world[0])}_"
+        f"{int(chapter[0])}"
+    )
+    header_key = (
+        f"v3_play_header_"
+        f"{int(world[0])}_"
+        f"{int(chapter[0])}"
+    )
+    body_key = (
+        f"v3_play_body_"
+        f"{int(world[0])}_"
+        f"{int(chapter[0])}"
+    )
+    dock_key = (
+        f"v3_play_dock_"
+        f"{int(world[0])}_"
+        f"{int(chapter[0])}"
+    )
+
+    with st.container(
+        key=surface_key,
+    ):
+        with st.container(
+            key=header_key,
+        ):
+            # V3_TRUE_ONE_SCREEN_HEADER_V1_20260908
+            # Chapter HUD + utility navigation share one physical row so
+            # Streamlit cannot spend a second header row on Archive/Analysis.
+            pack = get_theme_pack(
+                world[4]
+            )
+            section_key = (
+                f"v3_main_section_{world[0]}"
+            )
+            (
+                chapter_hud_col,
+                archive_col,
+                report_col,
+            ) = st.columns(
+                [0.84, 0.08, 0.08],
+                gap="small",
+                vertical_alignment="center",
+            )
+
+            with chapter_hud_col:
+                _render_chapter_story(
+                    user=user,
+                    world=world,
+                    chapter=chapter,
+                    review_expanded=False,
+                    render_header=True,
+                    render_tools=False,
+                )
+
+            with archive_col:
+                if st.button(
+                    "📚 기록",
+                    key=f"v3_shell_archive_{world[0]}",
+                    help=pack["archive_name"],
+                    use_container_width=True,
+                ):
+                    st.session_state[section_key] = pack["archive_name"]
+                    st.rerun()
+
+            with report_col:
+                if st.button(
+                    "📊 분석",
+                    key=f"v3_shell_report_{world[0]}",
+                    help=pack["report_name"],
+                    use_container_width=True,
+                ):
+                    st.session_state[section_key] = pack["report_name"]
+                    st.rerun()
+
+        with st.container(
+            key=body_key,
+        ):
+            _render_post_story_mode_body(
+                user=user,
+                world=world,
+                chapter=chapter,
+                play_mode=play_mode,
+            )
+
+        with st.container(
+            key=dock_key,
+        ):
+            render_play_action_hub(
+                world_id=world[0],
+                chapter_id=chapter[0],
+                active_mode=play_mode,
+                guide_name=guide_name,
+                theme=world[4],
+                learning_objectives=(
+                    chapter[5]
+                    or []
+                ),
+                target_concepts=(
+                    targets
+                    or []
+                ),
+            )
+
 
 # DAY6_SINGLE_STICKY_QUIZ_HUD_V1
 

@@ -161,18 +161,24 @@ def mock_story_chapter(context: dict[str, Any]) -> dict:
     title=outline.get("title_seed") or f"{place}의 {n}번째 기록"
     concept=concepts[0]
     story=(
-        f"{visual}을 지나던 당신과 {guide}는 {conflict}과 연결된 작은 이상을 발견했다. "
+        f"{visual}에는 {conflict}과 연결된 작은 이상이 나타나 있었다. "
         f"{guide}는 먼저 답을 내놓기보다 주변을 살피며, 지금까지 보지 못했던 표시 하나를 가리켰다.\n\n"
         f"표시 옆에는 현실의 용어로 '{concept}'을 확인하라는 짧은 기록이 남아 있었다. "
         f"이 지식을 이해해야 다음 장치를 안전하게 다룰 수 있다는 사실만은 분명했다.\n\n"
-        f"당신이 기록을 펼치자 멈춰 있던 상황이 조금씩 움직이기 시작했다. "
+        f"닫힌 기록 옆에는 다음 확인을 기다리는 신호가 천천히 깜박이고 있었다. "
         f"{guide}는 곁에 앉아 다음 선택을 기다렸고, 이제 실제 개념을 확인할 차례가 되었다."
     )
     end_chapter=int(context.get("block_end_chapter", n))
     total=int(context.get("target_chapter_count",9))
     choices=[]
     if n==end_chapter and n<total:
-        choices=["조금 더 기록을 조사한다.", "고양이와 주변 장소를 먼저 살펴본다."]
+        # DEV mock keeps both branches as action choices. Dialogue choices are
+        # reserved for Story moments where speaking itself is the meaningful
+        # branch; the renderer still supports them with synthetic QA data.
+        choices=[
+            {"text": "조금 더 기록을 조사한다.", "choice_type": "action"},
+            {"text": "고양이와 주변 장소를 먼저 살펴본다.", "choice_type": "action"},
+        ]
     return {
         "chapter_number": n,
         "title": title,
@@ -227,6 +233,7 @@ def mock_questions(context: dict[str, Any]) -> list[dict]:
             "question": f"개발용 Mock 문제 {i+1}. 방금 확인한 '{concept}'을 현재 상황에 적용할 때 가장 적절한 접근은 무엇인가요?",
             "choices": choices,
             "correct_index": correct,
+            "answer_audit": {"kind": "non_numeric", "canonical_answer": answer},
             "story_progress": (
                 f"{mode or 'story'} 흐름의 Mock Chapter 결과로 {concept} 관련 핵심 방향을 정리했다."
                 if i == 4
