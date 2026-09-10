@@ -137,6 +137,20 @@ def is_timeout_error(exc: Exception) -> bool:
     return _is_timeout(exc)
 
 
+def is_provider_unavailable_error(exc: Exception) -> bool:
+    """Return True only for Gemini/provider HTTP 503 failures."""
+    current: BaseException | None = exc
+    visited: set[int] = set()
+
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if _status_code(current) == 503:
+            return True
+        current = current.__cause__ or current.__context__
+
+    return False
+
+
 def _is_transient(exc: Exception) -> bool:
     code = _status_code(exc)
     if code in (408, 500, 502, 503, 504):

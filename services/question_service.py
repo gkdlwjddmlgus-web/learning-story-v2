@@ -11,7 +11,12 @@ import json
 import re
 
 from components.theme_system import get_theme_prompt_rules
-from services.ai_client import AIQuotaExhausted, DEFAULT_MODEL, is_timeout_error
+from services.ai_client import (
+    AIQuotaExhausted,
+    DEFAULT_MODEL,
+    is_provider_unavailable_error,
+    is_timeout_error,
+)
 from services.experience_profile_service import (
     build_question_pedagogy_rules,
     get_action_plan,
@@ -41,6 +46,19 @@ QUESTION_MAX_OUTPUT_TOKENS = 6144
 
 class QuestionGenerationError(RuntimeError):
     """사용자에게 노출 가능한 문제 생성 오류."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str = "generic",
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+
+    @property
+    def provider_unavailable(self) -> bool:
+        return self.category == "provider_unavailable"
 
 
 class EvidenceAnswerLeakError(ValueError):
@@ -1565,6 +1583,13 @@ Concept별 실제 문제 작성 규칙:
         ) from exc
 
     except Exception as exc:
+        if is_provider_unavailable_error(exc):
+            raise QuestionGenerationError(
+                "현재 AI 사용량이 몰려 문제 준비가 잠시 지연되고 있습니다. "
+                "앱과 학습 기록은 안전하게 유지되고 있으니 약 2분 후 다시 시도해주세요.",
+                category="provider_unavailable",
+            ) from exc
+
         if is_timeout_error(exc):
             raise QuestionGenerationError(
                 "문제 생성이 90초 안에 완료되지 않았습니다. "

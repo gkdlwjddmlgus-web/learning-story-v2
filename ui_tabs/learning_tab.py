@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import math
 import mimetypes
 import logging
 import html
@@ -142,8 +143,97 @@ from services.story_engine_service import (
 CHAPTER_STORY_CHOICES = 9
 CHAPTER_PHASE = 10
 CHAPTER_TARGET_CONCEPTS = 11
+QUESTION_GENERATION_COOLDOWN_SECONDS = 120
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _question_generation_retry_key(
+    *,
+    world_id: int,
+    chapter_id: int,
+) -> str:
+    return (
+        "_v3_question_generation_retry_after_"
+        f"{int(world_id)}_{int(chapter_id)}"
+    )
+
+
+def _start_question_generation_cooldown(
+    *,
+    world_id: int,
+    chapter_id: int,
+    now: float | None = None,
+) -> None:
+    current = time.time() if now is None else float(now)
+    st.session_state[
+        _question_generation_retry_key(
+            world_id=world_id,
+            chapter_id=chapter_id,
+        )
+    ] = current + QUESTION_GENERATION_COOLDOWN_SECONDS
+
+
+def _question_generation_retry_remaining(
+    *,
+    world_id: int,
+    chapter_id: int,
+    now: float | None = None,
+) -> int:
+    key = _question_generation_retry_key(
+        world_id=world_id,
+        chapter_id=chapter_id,
+    )
+    retry_after = float(
+        st.session_state.get(key, 0.0)
+        or 0.0
+    )
+    current = time.time() if now is None else float(now)
+    remaining = retry_after - current
+
+    if remaining <= 0:
+        st.session_state.pop(key, None)
+        return 0
+
+    return int(math.ceil(remaining))
+
+
+def _render_question_generation_cooldown(
+    *,
+    world_id: int,
+    chapter_id: int,
+    prepare_label: str,
+) -> bool:
+    retry_remaining = _question_generation_retry_remaining(
+        world_id=world_id,
+        chapter_id=chapter_id,
+    )
+    if retry_remaining <= 0:
+        return False
+
+    st.warning(
+        "현재 AI 사용량이 몰려 문제 준비가 잠시 지연되고 있습니다. "
+        "사용자 입력 문제나 앱 중단이 아니며, 학습 기록은 안전하게 유지됩니다."
+    )
+    st.caption(
+        f"약 {retry_remaining}초 후 다시 시도할 수 있습니다. "
+        "자동 재시도는 실행되지 않습니다."
+    )
+    st.button(
+        prepare_label,
+        key=f"generate_questions_{int(chapter_id)}",
+        disabled=True,
+        width="stretch",
+    )
+    if st.button(
+        "다시 시도할 수 있는지 확인",
+        key=(
+            "question_retry_status_"
+            f"{int(world_id)}_{int(chapter_id)}"
+        ),
+    ):
+        st.rerun()
+    return True
 
 USER_REPLY_TEMPLATES = {
     "동화": (
@@ -3898,6 +3988,13 @@ def _render_post_story_mode_body(
                 )
             )
 
+            if _render_question_generation_cooldown(
+                world_id=world[0],
+                chapter_id=chapter[0],
+                prepare_label=prepare_label,
+            ):
+                return
+
             if st.button(
                 prepare_label,
                 type="primary",
@@ -4003,9 +4100,14 @@ def _render_post_story_mode_body(
                         st.rerun()
 
                     except QuestionGenerationError as exc:
-                        st.error(
-                            str(exc)
-                        )
+                        if exc.provider_unavailable:
+                            _start_question_generation_cooldown(
+                                world_id=world[0],
+                                chapter_id=chapter[0],
+                            )
+                            st.rerun()
+
+                        st.error(str(exc))
 
                     except Exception:
                         st.error(
