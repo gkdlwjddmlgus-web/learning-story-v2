@@ -183,7 +183,7 @@ def _css(theme: str) -> str:
         position:relative;
         isolation:isolate;
         width:min(100%, 1360px);
-        height:clamp(500px,67dvh,700px);
+        height:clamp(430px,calc(100dvh - 9rem),620px);
         margin:.2rem auto 0;
         overflow:hidden;
         border-radius:22px;
@@ -191,6 +191,22 @@ def _css(theme: str) -> str:
         background:{style["stage_bg"]};
         box-shadow:0 28px 80px rgba(0,0,0,.18);
         animation:dialogueSceneFadeIn .34s ease-out both;
+    }}
+
+    .dialogue-scene-stage.dialogue-scene-stage-compact {{
+        height:clamp(340px,calc(100dvh - 28rem),460px);
+    }}
+
+    .dialogue-scene-stage.dialogue-scene-stage-compact
+    .dialogue-scene-character {{
+        bottom:92px;
+        width:clamp(112px,13vw,180px);
+        height:clamp(145px,21dvh,225px);
+    }}
+
+    .dialogue-scene-stage.dialogue-scene-stage-compact
+    .dialogue-box {{
+        min-height:84px;
     }}
 
     .dialogue-scene-background {{
@@ -348,7 +364,23 @@ def _css(theme: str) -> str:
     .dialogue-narrator .dialogue-text {{ color:#26394d; font-size:clamp(.94rem,1.28vw,1.16rem); }}
 
     @media (max-width:768px) {{
-        .dialogue-scene-stage {{ height:590px; border-radius:16px; }}
+        .dialogue-scene-stage {{
+            height:clamp(390px,calc(100dvh - 15rem),540px);
+            border-radius:16px;
+        }}
+        .dialogue-scene-stage.dialogue-scene-stage-compact {{
+            height:clamp(340px,calc(100dvh - 22rem),430px);
+        }}
+        .dialogue-scene-stage.dialogue-scene-stage-compact
+        .dialogue-scene-character.companion,
+        .dialogue-scene-stage.dialogue-scene-stage-compact
+        .dialogue-scene-character.player,
+        .dialogue-scene-stage.dialogue-scene-stage-compact
+        .dialogue-scene-character.npc {{
+            bottom:112px;
+            width:104px;
+            height:145px;
+        }}
         .dialogue-scene-context {{ display:none; }}
         .dialogue-scene-character.companion {{ left:24%; right:auto; transform:translateX(-50%); bottom:140px; width:138px; height:195px; }}
         .dialogue-scene-character.player,
@@ -381,6 +413,7 @@ def render_dialogue_scene(
     next_label: str | None = None,
     show_next_button: bool = True,
     show_scene_chrome: bool = False,
+    compact: bool = False,
 ) -> bool:
     """Visual-novel style V3 Dialogue Scene presentation component."""
     normalized_theme = _normalize_theme(theme)
@@ -500,12 +533,17 @@ def render_dialogue_scene(
         if normalized_role == "player"
         else "dialogue-box"
     )
+    stage_class = (
+        "dialogue-scene-stage dialogue-scene-stage-compact"
+        if compact
+        else "dialogue-scene-stage"
+    )
 
     st.markdown(
         generated_text_readability_css()
         + _css(normalized_theme)
         + (
-            '<section class="dialogue-scene-stage">'
+            f'<section class="{stage_class}">'
             f'{background_html}{kicker_html}{context_html}{character_html}'
             f'<div class="{box_class}"><div class="dialogue-copy">'
             f'{speaker_html}<div class="dialogue-text">{safe_text}</div>'

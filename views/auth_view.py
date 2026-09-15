@@ -49,7 +49,7 @@ def render_auth():
                 "로그인",
                 type="primary",
                 key="v3_login_submit",
-                use_container_width=True,
+                width="stretch",
             ):
                 success, result = login_user(
                     login_username,
@@ -88,8 +88,9 @@ def render_auth():
 
             if st.button(
                 "회원가입",
+                type="primary",
                 key="v3_signup_submit",
-                use_container_width=True,
+                width="stretch",
             ):
                 if (
                     signup_password

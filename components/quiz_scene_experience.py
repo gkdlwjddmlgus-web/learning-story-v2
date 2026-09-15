@@ -402,10 +402,26 @@ def render_quiz_feedback_dialogue(
     )
     beat = beats[current_index]
 
-    portrait_path = resolve_portrait(
+    companion_portrait_path = resolve_portrait(
         theme,
-        beat["speaker_type"],
+        "companion",
         character_id="default",
+    )
+    player_portrait_path = resolve_portrait(
+        theme,
+        "player",
+        character_id="default",
+    )
+    portrait_path = (
+        companion_portrait_path
+        if beat["speaker_type"] == "companion"
+        else player_portrait_path
+        if beat["speaker_type"] == "player"
+        else resolve_portrait(
+            theme,
+            beat["speaker_type"],
+            character_id="default",
+        )
     )
     background_path = resolve_background(
         theme,
@@ -454,6 +470,8 @@ def render_quiz_feedback_dialogue(
         speaker_name=beat["speaker_name"],
         text=beat["text"],
         portrait_path=portrait_path,
+        companion_portrait_path=companion_portrait_path,
+        player_portrait_path=player_portrait_path,
         background_path=background_path,
         context_label=" · ".join(
             context_bits
@@ -467,6 +485,7 @@ def render_quiz_feedback_dialogue(
         next_label=next_label,
         show_next_button=True,
         show_scene_chrome=True,
+        compact=True,
     )
 
     if clicked:

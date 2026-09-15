@@ -740,11 +740,12 @@ def generate_live_json(
                 config=types.GenerateContentConfig(**kwargs),
             )
 
-            text = (response.text or "").strip()
-            if not text:
+            raw_text = (response.text or "").strip()
+            if not raw_text:
                 raise ValueError("AI가 빈 응답을 반환했습니다.")
 
-            response_chars = len(text)
+            response_chars = len(raw_text)
+            text = raw_text
 
             if text.startswith("```"):
                 text = (
@@ -753,7 +754,24 @@ def generate_live_json(
                     .strip()
                 )
 
-            result = json.loads(text)
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError as exc:
+                print(
+                    "\n"
+                    "=== AI JSON PARSE FAILURE ===\n"
+                    f"model={model} key_slot={key_slot} "
+                    f"attempt={attempt_count} use_schema={use_schema}\n"
+                    f"error={type(exc).__name__}: {exc}\n"
+                    f"line={exc.lineno} column={exc.colno} "
+                    f"char={exc.pos}\n"
+                    f"response_chars={response_chars}\n"
+                    "raw_response_omitted=true\n"
+                    "=== END AI JSON PARSE FAILURE ===\n",
+                    flush=True,
+                )
+                raise
+
             _validate_local_json_schema(result, schema)
 
             return result, {
