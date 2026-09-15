@@ -24,6 +24,23 @@ def main() -> None:
         ],
     )
     require(
+        "components/dialogue_story_experience.py",
+        [
+            "@st.fragment",
+            "def _move_story_scene(",
+            '[data-stale="true"]',
+        ],
+    )
+    require(
+        "ui_tabs/learning_tab.py",
+        [
+            "@media (min-width:900px)",
+            "v3-evidence-object",
+            "사건 기록 문서",
+            "rgba(5,14,24,.70)",
+        ],
+    )
+    require(
         "components/quiz_scene_experience.py",
         [
             'companion_portrait_path = resolve_portrait(',
@@ -60,6 +77,9 @@ def main() -> None:
         raise AssertionError("raw AI response must not be printed")
 
     print("[PASS] Story stage is bounded by the viewport")
+    print("[PASS] Story manual navigation is fragment-scoped without stale fade")
+    print("[PASS] Desktop play shell keeps one-screen layout and themed background")
+    print("[PASS] Evidence uses a compact record prop instead of a duplicate scene image")
     print("[PASS] Quiz feedback uses compact dialogue layout")
     print("[PASS] Companion/player theme portraits persist after answer submission")
     print("[PASS] Login and signup primary actions have explicit contrast")

@@ -24,7 +24,21 @@ def main() -> int:
     assert "value=False" in render_source
     assert "_render_auto_advance_tick(" in render_source
     assert "mark_dialogue_story_seen(chapter_id)" in render_source
-    assert "st.session_state[index_key] = current_index + 1" in render_source
+    assert "else (chapter_id, index_key, current_index + 1)" in render_source
+    assert any(
+        isinstance(decorator, ast.Attribute)
+        and decorator.attr == "fragment"
+        for decorator in render.decorator_list
+    )
+
+    move = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_move_story_scene"
+    )
+    move_source = ast.get_source_segment(source, move) or ""
+    assert "st.session_state[index_key]" in move_source
 
     tick = next(
         node
@@ -39,6 +53,7 @@ def main() -> int:
     print("[PASS] Chapter Story starts in deterministic manual mode")
     print("[PASS] autoplay remains available as an explicit opt-in")
     print("[PASS] manual navigation and Story completion contracts remain")
+    print("[PASS] manual scene changes use a fragment-scoped rerun")
     return 0
 
 

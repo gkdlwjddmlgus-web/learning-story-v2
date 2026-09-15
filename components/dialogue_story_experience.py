@@ -69,6 +69,16 @@ def _clear_auto_scene_state(chapter_id: int) -> None:
         st.session_state.pop(key, None)
 
 
+def _move_story_scene(
+    chapter_id: int,
+    index_key: str,
+    target_index: int,
+) -> None:
+    """Apply navigation before Streamlit starts the fragment rerun."""
+    _clear_auto_scene_state(chapter_id)
+    st.session_state[index_key] = max(0, int(target_index))
+
+
 def _scene_duration_seconds(
     *,
     text: str,
@@ -128,6 +138,14 @@ def _story_runtime_layout_css() -> str:
         .dialogue-story-runtime-anchor
     ) {
         gap: .38rem !important;
+    }
+
+    /* A fragment transition is short, but Streamlit otherwise fades the
+       complete previous scene while its replacement delta arrives. */
+    div[data-testid="stAppViewContainer"]:has(
+        .dialogue-story-runtime-anchor
+    ) [data-stale="true"] {
+        opacity: 1 !important;
     }
 
     div[data-testid="stElementContainer"]:has(
@@ -348,6 +366,7 @@ else:
             "사용할 수 없어 수동 진행으로 유지됩니다."
         )
 
+@st.fragment
 def render_dialogue_story_experience(
     *,
     chapter_id: int,
@@ -465,10 +484,10 @@ def render_dialogue_story_experience(
             type="secondary",
             use_container_width=True,
             disabled=(current_index <= 0),
+            on_click=_move_story_scene,
+            args=(chapter_id, index_key, current_index - 1),
         ):
-            _clear_auto_scene_state(chapter_id)
-            st.session_state[index_key] = max(0, current_index - 1)
-            st.rerun()
+            pass
 
     with control_mid:
         st.caption(
@@ -476,19 +495,21 @@ def render_dialogue_story_experience(
         )
 
     with control_next:
-        if st.button(
+        next_clicked = st.button(
             next_label,
             key=f"dialogue_runtime_v1_next_{chapter_id}_{current_index}",
             type="secondary",
             use_container_width=True,
-        ):
+            on_click=(None if is_last else _move_story_scene),
+            args=(
+                ()
+                if is_last
+                else (chapter_id, index_key, current_index + 1)
+            ),
+        )
+        if next_clicked and is_last:
             _clear_auto_scene_state(chapter_id)
-
-            if is_last:
-                mark_dialogue_story_seen(chapter_id)
-            else:
-                st.session_state[index_key] = current_index + 1
-
+            mark_dialogue_story_seen(chapter_id)
             st.rerun()
 
     with control_auto:

@@ -2812,15 +2812,14 @@ def render_quiz(
             '<small>문제를 풀기 전에 확인해야 할 정보입니다.</small></span></div>',
             unsafe_allow_html=True,
         )
-        context_image = _v3_context_image_path(
-            theme=world[4],
-            chapter_number=chapter[2],
+        # The contextual scene image now owns the full play-shell background.
+        # A compact record prop preserves the clue affordance without
+        # duplicating the same large image inside the evidence column.
+        st.markdown(
+            '<div class="v3-evidence-object" role="img" '
+            'aria-label="사건 기록 문서">📜</div>',
+            unsafe_allow_html=True,
         )
-        if context_image is not None:
-            st.image(
-                str(context_image),
-                use_container_width=True,
-            )
         _render_v3_quiz_evidence_card(
             task_label=task_label,
             evidence_summary=evidence_summary,
@@ -3290,7 +3289,7 @@ def _inject_v3_one_screen_play_layout_css(
         background_path
     )
     shell_background = (
-        f'linear-gradient(rgba(5,14,24,.34),rgba(5,14,24,.48)),url("{background_uri}") center/cover fixed'
+        f'linear-gradient(rgba(5,14,24,.56),rgba(5,14,24,.70)),url("{background_uri}") center/cover fixed'
         if background_uri
         else 'linear-gradient(135deg,#071522,#10283a)'
     )
@@ -3299,7 +3298,7 @@ def _inject_v3_one_screen_play_layout_css(
         f"""
         <style>
         /* V3_GAME_UI_ALIGNMENT_V2_20260908 */
-        @media (min-width:900px) and (min-height:650px) {{
+        @media (min-width:900px) {{
             html, body, .stApp,
             div[data-testid="stAppViewContainer"],
             section[data-testid="stMain"] {{
@@ -3527,6 +3526,21 @@ def _inject_v3_one_screen_play_layout_css(
                 object-fit:cover !important;
                 border-radius:13px !important;
                 border:1px solid rgba(255,255,255,.12) !important;
+            }}
+
+            {body_class} .v3-evidence-object {{
+                display:grid !important;
+                place-items:center !important;
+                height:clamp(76px,11vh,108px) !important;
+                margin:0 !important;
+                border:1px solid rgba(255,255,255,.15) !important;
+                border-radius:13px !important;
+                background:linear-gradient(145deg,rgba(8,22,36,.94),rgba(18,39,55,.88)) !important;
+                color:#f0cf83 !important;
+                -webkit-text-fill-color:#f0cf83 !important;
+                font-size:clamp(2.2rem,4vw,3.4rem) !important;
+                line-height:1 !important;
+                box-shadow:inset 0 1px 0 rgba(255,255,255,.05) !important;
             }}
 
             {body_class} div[data-testid="stRadio"] div[role="radiogroup"] {{ gap:.28rem !important; }}
@@ -3841,7 +3855,7 @@ def _inject_v3_one_screen_play_layout_css(
             .v3-story-choice-heading span {{ color:#aebdcc; font-size:.68rem; }}
         }}
 
-        @media (max-width:899px), (max-height:649px) {{
+        @media (max-width:899px) {{
             {surface_class}, {body_class} {{ height:auto !important; max-height:none !important; overflow:visible !important; }}
             {surface_class} > div[data-testid="stVerticalBlock"] {{ display:flex !important; height:auto !important; }}
             {body_class} > div[data-testid="stVerticalBlock"] {{ overflow:visible !important; }}
