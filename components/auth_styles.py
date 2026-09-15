@@ -214,10 +214,13 @@ def apply_auth_styles() -> None:
             font-weight:900 !important;
         }}
 
+        .st-key-v3_auth_card .st-key-v3_login_submit button,
+        .st-key-v3_auth_card .st-key-v3_signup_submit button,
         .st-key-v3_auth_card
         button[data-testid="stBaseButton-primary"] {{
             border:none !important;
             color:#fff !important;
+            -webkit-text-fill-color:#fff !important;
             background:
                 linear-gradient(
                     135deg,

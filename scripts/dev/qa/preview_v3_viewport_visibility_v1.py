@@ -34,6 +34,14 @@ def main() -> None:
         ],
     )
     require(
+        "components/auth_styles.py",
+        [
+            ".st-key-v3_login_submit button",
+            ".st-key-v3_signup_submit button",
+            "-webkit-text-fill-color:#fff !important",
+        ],
+    )
+    require(
         "views/auth_view.py",
         [
             '"회원가입",\n                type="primary",',
