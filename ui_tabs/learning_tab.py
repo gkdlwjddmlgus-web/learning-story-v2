@@ -26,6 +26,7 @@ from components.dialogue_interaction import (
     render_dialogue_interaction,
 )
 from services.dialogue_asset_service import (
+    resolve_companion_action_portrait,
     resolve_portrait,
 )
 
@@ -127,6 +128,7 @@ from services.play_runtime_service import (
     PLAY_MODE_QUIZ,
     PLAY_MODE_REVIEW,
     PLAY_MODE_STORY,
+    PLAY_MODE_NOTE,
     resolve_play_mode,
 )
 from services.story_engine_service import (
@@ -2389,28 +2391,24 @@ def _render_v3_story_review_panel(
         unsafe_allow_html=True,
     )
 
-    scene_col, story_col, clue_col = st.columns(
-        [0.20, 0.53, 0.27],
+    st.session_state.setdefault(
+        scene_key,
+        selected_scene,
+    )
+    selected_scene = st.segmented_control(
+        "스토리 장면",
+        options=range(len(beats)),
+        format_func=lambda i: str(i + 1),
+        key=scene_key,
+        label_visibility="collapsed",
+        width="content",
+    )
+    selected_scene = int(selected_scene or 0)
+
+    story_col, clue_col = st.columns(
+        [0.72, 0.28],
         gap="medium",
     )
-
-    with scene_col:
-        st.markdown(
-            '<div class="v3-review-scene-list-title">장면 목록</div>',
-            unsafe_allow_html=True,
-        )
-        selected_scene = st.radio(
-            "스토리 장면",
-            options=range(
-                len(beats)
-            ),
-            index=selected_scene,
-            format_func=lambda i: (
-                f"Scene {i + 1}"
-            ),
-            key=scene_key,
-            label_visibility="collapsed",
-        )
 
     with story_col:
         beat = beats[selected_scene]
@@ -2418,10 +2416,9 @@ def _render_v3_story_review_panel(
             theme=world[4],
             chapter_number=chapter[2],
         )
-        companion_portrait = resolve_portrait(
+        companion_portrait = resolve_companion_action_portrait(
             world[4],
-            "companion",
-            character_id="default",
+            "investigate",
         )
         background_uri = _v3_file_data_uri(
             background_path
@@ -3162,15 +3159,21 @@ def _render_companion_play_mode(
             unsafe_allow_html=True,
         )
 
-        portrait_path = resolve_portrait(
+        portrait_actions = (
+            "explain",
+            "investigate",
+            "thinking",
+            "notebook",
+            "thinking",
+        )
+        portrait_path = resolve_companion_action_portrait(
             world[4],
-            "companion",
-            character_id="default",
+            portrait_actions[selected_prompt],
         )
         if portrait_path is not None:
             st.image(
                 str(portrait_path),
-                use_container_width=True,
+                width="stretch",
             )
 
         _render_character_interaction(
@@ -3265,6 +3268,86 @@ def _render_companion_play_mode(
 
 
 
+def _render_learning_note_mode(
+    *,
+    user,
+    world,
+    chapter,
+) -> None:
+    """Render saved material as an open book using guarded quiz progress."""
+    questions = chapter[6] or []
+    if questions:
+        _initialize_quiz_progress_from_db(
+            user=user,
+            world=world,
+            chapter=chapter,
+            questions=questions,
+        )
+    index = int(st.session_state.get("question_index", 0))
+    question = questions[index] if questions and index < len(questions) else {}
+    concept = _sanitize_learning_text(question.get("concept"))
+    concept_brief = _sanitize_learning_text(question.get("concept_brief"))
+    explanation = _sanitize_learning_text(question.get("explanation"))
+    evidence = _sanitize_learning_text(question.get("evidence_summary"))
+    targets = (
+        chapter[CHAPTER_TARGET_CONCEPTS]
+        if len(chapter) > CHAPTER_TARGET_CONCEPTS
+        else []
+    )
+    safe_title = html.escape(concept or "이번 Chapter의 핵심 개념")
+    safe_brief = html.escape(
+        concept_brief
+        or "문제의 조건과 핵심 개념을 연결해 판단 기준을 세워보세요."
+    )
+    safe_explanation = html.escape(
+        explanation
+        or "선택지의 표현보다 주어진 값과 조건을 먼저 비교하면 답의 근거가 선명해집니다."
+    )
+    safe_evidence = html.escape(
+        evidence
+        or "현재 사건 기록에서 확인한 단서를 다시 읽어보세요."
+    )
+    keyword_html = "".join(
+        f'<span>{html.escape(_sanitize_learning_text(item))}</span>'
+        for item in targets
+        if _sanitize_learning_text(item)
+    ) or '<span>핵심 개념</span>'
+    notebook_portrait = resolve_companion_action_portrait(
+        world[4],
+        "notebook",
+    )
+    notebook_uri = _v3_file_data_uri(notebook_portrait)
+    notebook_html = (
+        '<div class="v3-book-companion">'
+        f'<img src="{notebook_uri}" alt="학습 노트를 정리하는 동료">'
+        '</div>'
+        if notebook_uri and str(world[4]).strip() in {"미스터리", "미스테리", "mystery"}
+        else ""
+    )
+
+    st.markdown(
+        '<section class="v3-open-book">'
+        '<div class="v3-book-page v3-book-left">'
+        '<div class="v3-book-kicker">학습 노트</div>'
+        f'<h2>{safe_title}</h2>'
+        '<div class="v3-book-tabs"><b>개념</b><span>복습</span></div>'
+        f'{notebook_html}'
+        f'<p class="v3-book-lead">{safe_brief}</p>'
+        f'<div class="v3-book-keywords">{keyword_html}</div>'
+        '<div class="v3-book-sign">코드를 읽는 눈이 진실에 가까워진다.<br>— 동료의 기록 —</div>'
+        '</div>'
+        '<div class="v3-book-page v3-book-right">'
+        '<div class="v3-book-kicker">이번 사건의 기록</div>'
+        f'<div class="v3-book-fact">{safe_evidence}</div>'
+        f'<p>{safe_explanation}</p>'
+        '<div class="v3-book-note">자료와 조건을 구분하면 데이터의 의미가 보인다.</div>'
+        '</div>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+
+
+
 
 
 # V3_ONE_SCREEN_PLAY_LAYOUT_V1_20260908
@@ -3325,6 +3408,8 @@ def _inject_v3_one_screen_play_layout_css(
             }}
 
             {surface_class} {{
+                display:grid !important;
+                grid-template-rows:auto minmax(0,1fr) auto !important;
                 height:calc(100dvh - .75rem) !important;
                 max-height:calc(100dvh - .75rem) !important;
                 min-height:0 !important;
@@ -3349,6 +3434,20 @@ def _inject_v3_one_screen_play_layout_css(
                 min-height:0 !important;
                 margin:0 !important;
             }}
+            {surface_class} > [data-testid="stLayoutWrapper"] {{
+                min-height:0 !important;
+                margin:0 !important;
+            }}
+            {surface_class} > [data-testid="stLayoutWrapper"]:has({body_class}) {{
+                position:relative !important;
+                z-index:1 !important;
+                height:100% !important;
+                overflow:hidden !important;
+            }}
+            {surface_class} > [data-testid="stLayoutWrapper"]:has({dock_class}) {{
+                position:relative !important;
+                z-index:10 !important;
+            }}
             {surface_class} > div[data-testid="stVerticalBlock"]
             > div[data-testid="stElementContainer"]:has({body_class}) {{
                 height:100% !important;
@@ -3371,6 +3470,13 @@ def _inject_v3_one_screen_play_layout_css(
             {dock_class} {{
                 min-height:0 !important;
                 margin:0 !important;
+            }}
+
+            {header_class}, {body_class}, {dock_class} {{
+                border-color:rgba(214,164,82,.72) !important;
+                box-shadow:
+                    inset 0 0 0 1px rgba(255,222,151,.12),
+                    0 12px 32px rgba(0,0,0,.30) !important;
             }}
 
             {header_class} > div[data-testid="stVerticalBlock"] {{
@@ -3401,9 +3507,9 @@ def _inject_v3_one_screen_play_layout_css(
                 height:100% !important;
                 max-height:none !important;
                 overflow:hidden !important;
-                border:1px solid rgba(255,255,255,.12) !important;
-                border-radius:18px !important;
-                background:rgba(6,17,29,.58) !important;
+                border:1px solid rgba(214,164,82,.72) !important;
+                border-radius:4px !important;
+                background:rgba(5,16,27,.70) !important;
                 backdrop-filter:blur(5px);
                 -webkit-backdrop-filter:blur(5px);
                 box-shadow:0 18px 46px rgba(0,0,0,.18);
@@ -3434,7 +3540,24 @@ def _inject_v3_one_screen_play_layout_css(
                 align-items:stretch !important;
             }}
 
-            {body_class} div[data-testid="column"] {{
+            {body_class} [data-testid="stSegmentedControl"] {{
+                margin:0 auto .15rem !important;
+            }}
+            {body_class} [data-testid="stSegmentedControl"] button {{
+                min-width:2.2rem !important;
+                min-height:1.85rem !important;
+                padding:.1rem .55rem !important;
+                border-color:rgba(199,151,78,.46) !important;
+                background:rgba(7,22,35,.92) !important;
+                color:#f4e4bd !important;
+            }}
+            {body_class} [data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
+                border-color:#e0a65b !important;
+                background:#6f2933 !important;
+                color:#fff2d3 !important;
+            }}
+
+            {body_class} div[data-testid="stColumn"] {{
                 min-width:0 !important;
             }}
 
@@ -3568,9 +3691,9 @@ def _inject_v3_one_screen_play_layout_css(
 
             {dock_class} {{
                 padding:.46rem .5rem .5rem !important;
-                border:1px solid rgba(255,255,255,.14) !important;
-                border-radius:15px !important;
-                background:rgba(7,19,31,.88) !important;
+                border:1px solid rgba(214,164,82,.72) !important;
+                border-radius:4px !important;
+                background:rgba(5,17,29,.94) !important;
                 box-shadow:0 14px 34px rgba(0,0,0,.26) !important;
                 backdrop-filter:blur(15px) saturate(125%) !important;
                 -webkit-backdrop-filter:blur(15px) saturate(125%) !important;
@@ -3582,9 +3705,9 @@ def _inject_v3_one_screen_play_layout_css(
                 width:100% !important;
                 min-height:2.82rem !important;
                 padding:.34rem .38rem !important;
-                border-radius:11px !important;
-                border:1px solid rgba(255,255,255,.16) !important;
-                background:rgba(255,255,255,.055) !important;
+                border-radius:5px !important;
+                border:1px solid rgba(188,145,76,.46) !important;
+                background:linear-gradient(180deg,rgba(17,37,52,.96),rgba(8,24,38,.96)) !important;
                 color:#edf4fb !important;
                 font-size:.70rem !important;
                 line-height:1.22 !important;
@@ -3592,10 +3715,64 @@ def _inject_v3_one_screen_play_layout_css(
                 white-space:pre-line !important;
             }}
             {dock_class} div[data-testid="stButton"] > button[kind="primary"] {{
-                background:color-mix(in srgb,var(--learn-accent) 26%,rgba(10,28,44,.94)) !important;
-                border-color:color-mix(in srgb,var(--learn-accent) 55%,transparent) !important;
-                box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--learn-accent) 18%,transparent) !important;
+                background:linear-gradient(135deg,rgba(112,36,42,.98),rgba(75,28,38,.98)) !important;
+                border-color:#dc9b52 !important;
+                box-shadow:inset 0 0 0 1px rgba(255,212,132,.18) !important;
             }}
+
+            .v3-open-book {{
+                display:grid !important;
+                grid-template-columns:1fr 1fr !important;
+                width:min(100%,1040px) !important;
+                height:100% !important;
+                min-height:0 !important;
+                margin:0 auto !important;
+                padding:1rem 1.2rem !important;
+                box-sizing:border-box !important;
+                border:12px solid rgba(63,34,17,.84) !important;
+                outline:1px solid #c7974e !important;
+                background:#d8c29c !important;
+                box-shadow:0 20px 44px rgba(0,0,0,.44) !important;
+                color:#28231d !important;
+                overflow:hidden !important;
+            }}
+            .v3-book-page {{
+                position:relative !important;
+                min-width:0 !important;
+                padding:1rem 1.25rem !important;
+                background:
+                    repeating-linear-gradient(0deg,rgba(104,78,43,.035) 0,rgba(104,78,43,.035) 1px,transparent 1px,transparent 24px),
+                    linear-gradient(100deg,#ead9b8,#f3e4c5 58%,#dfc79f) !important;
+                color:#28231d !important;
+                overflow-y:auto !important;
+            }}
+            .v3-book-left {{ border-right:1px solid rgba(91,59,29,.32) !important; }}
+            .v3-book-right {{ box-shadow:inset 14px 0 22px rgba(80,48,23,.10) !important; }}
+            .v3-open-book, .v3-open-book * {{ -webkit-text-fill-color:currentColor !important; }}
+            .v3-book-kicker {{ color:#2e261d !important; font-size:.82rem !important; font-weight:950 !important; }}
+            .v3-book-page h2 {{ margin:.35rem 0 .65rem !important; color:#2e261d !important; font-size:1.35rem !important; }}
+            .v3-book-tabs {{ display:flex !important; gap:.35rem !important; margin-bottom:.7rem !important; }}
+            .v3-book-tabs > * {{ padding:.26rem .78rem !important; border:1px solid #9a7040 !important; border-radius:4px !important; }}
+            .v3-book-tabs b {{ background:#783239 !important; color:#fff1d0 !important; }}
+            .v3-book-companion {{
+                float:right !important;
+                width:clamp(88px,24%,142px) !important;
+                height:clamp(96px,18vh,150px) !important;
+                margin:-.35rem 0 .35rem .65rem !important;
+            }}
+            .v3-book-companion img {{
+                width:100% !important;
+                height:100% !important;
+                object-fit:contain !important;
+                object-position:center bottom !important;
+                filter:sepia(.12) drop-shadow(0 6px 8px rgba(70,42,19,.18)) !important;
+            }}
+            .v3-book-lead, .v3-book-page p {{ font-size:.82rem !important; line-height:1.58 !important; font-weight:650 !important; }}
+            .v3-book-keywords {{ display:flex !important; flex-wrap:wrap !important; gap:.35rem !important; margin:.8rem 0 !important; }}
+            .v3-book-keywords span {{ padding:.2rem .48rem !important; border-bottom:2px solid #9c3038 !important; font-size:.72rem !important; font-weight:850 !important; }}
+            .v3-book-fact {{ margin:.8rem 0 !important; padding:.7rem !important; border-top:1px solid #8c673c !important; border-bottom:1px solid #8c673c !important; font-size:1rem !important; font-weight:900 !important; }}
+            .v3-book-note {{ margin-top:1rem !important; padding:.7rem !important; transform:rotate(-2deg) !important; background:#dcc27b !important; box-shadow:0 3px 8px rgba(65,39,18,.22) !important; font-size:.76rem !important; font-weight:800 !important; }}
+            .v3-book-sign {{ margin-top:1rem !important; text-align:right !important; font-size:.72rem !important; line-height:1.45 !important; font-style:italic !important; }}
 
             .v3-question-card {{
                 position:relative;
@@ -3856,10 +4033,355 @@ def _inject_v3_one_screen_play_layout_css(
         }}
 
         @media (max-width:899px) {{
-            {surface_class}, {body_class} {{ height:auto !important; max-height:none !important; overflow:visible !important; }}
-            {surface_class} > div[data-testid="stVerticalBlock"] {{ display:flex !important; height:auto !important; }}
-            {body_class} > div[data-testid="stVerticalBlock"] {{ overflow:visible !important; }}
-            .v3-review-stage {{ min-height:360px; }}
+            html, body, .stApp,
+            div[data-testid="stAppViewContainer"],
+            section[data-testid="stMain"] {{
+                height:100dvh !important;
+                max-height:100dvh !important;
+                overflow:hidden !important;
+            }}
+
+            header[data-testid="stHeader"],
+            #MainMenu, footer, [data-testid="stDecoration"] {{
+                display:none !important;
+            }}
+
+            div[data-testid="stMainBlockContainer"]:has({surface_class}),
+            .main .block-container:has({surface_class}) {{
+                width:100% !important;
+                max-width:none !important;
+                height:100dvh !important;
+                max-height:100dvh !important;
+                overflow:hidden !important;
+                box-sizing:border-box !important;
+                padding:.24rem !important;
+                background:{shell_background} !important;
+            }}
+
+            {surface_class} {{
+                display:grid !important;
+                grid-template-rows:auto minmax(0,1fr) auto !important;
+                height:calc(100dvh - .48rem) !important;
+                max-height:calc(100dvh - .48rem) !important;
+                min-height:0 !important;
+                overflow:hidden !important;
+                margin:0 !important;
+                padding:0 !important;
+            }}
+
+            {surface_class} > div[data-testid="stVerticalBlock"] {{
+                display:grid !important;
+                grid-template-rows:auto minmax(0,1fr) auto !important;
+                height:100% !important;
+                min-height:0 !important;
+                gap:.2rem !important;
+            }}
+            {surface_class} > div[data-testid="stVerticalBlock"]
+            > div[data-testid="stElementContainer"] {{
+                min-height:0 !important;
+                margin:0 !important;
+            }}
+            {surface_class} > [data-testid="stLayoutWrapper"] {{
+                min-height:0 !important;
+                margin:0 !important;
+            }}
+            {surface_class} > [data-testid="stLayoutWrapper"]:has({body_class}) {{
+                position:relative !important;
+                z-index:1 !important;
+                height:100% !important;
+                overflow:hidden !important;
+            }}
+            {surface_class} > [data-testid="stLayoutWrapper"]:has({dock_class}) {{
+                position:relative !important;
+                z-index:10 !important;
+            }}
+            {surface_class} > div[data-testid="stVerticalBlock"]
+            > div[data-testid="stElementContainer"]:has({body_class}) {{
+                height:100% !important;
+                overflow:hidden !important;
+            }}
+
+            {header_class}, {body_class}, {dock_class} {{
+                min-height:0 !important;
+                margin:0 !important;
+                border:1px solid rgba(214,164,82,.76) !important;
+                border-radius:3px !important;
+                background:rgba(5,17,29,.94) !important;
+                box-shadow:inset 0 0 0 1px rgba(255,222,151,.10) !important;
+            }}
+
+            {header_class} {{ padding:.32rem .38rem !important; }}
+            {header_class} > div[data-testid="stVerticalBlock"] {{ gap:0 !important; }}
+            {header_class} div[data-testid="stHorizontalBlock"] {{
+                display:flex !important;
+                flex-wrap:nowrap !important;
+                gap:.22rem !important;
+                align-items:center !important;
+            }}
+            {header_class} div[data-testid="stColumn"]:first-child {{
+                flex:1 1 auto !important;
+                width:auto !important;
+                min-width:0 !important;
+            }}
+            {header_class} div[data-testid="stColumn"]:not(:first-child) {{
+                flex:0 0 3.15rem !important;
+                width:3.15rem !important;
+                min-width:3.15rem !important;
+            }}
+            {header_class} [data-testid="stCaptionContainer"] {{ display:none !important; }}
+            {header_class} div[data-testid="stButton"] > button {{
+                width:100% !important;
+                min-height:3.15rem !important;
+                height:3.15rem !important;
+                padding:.15rem .1rem !important;
+                border:1px solid rgba(214,164,82,.48) !important;
+                border-radius:4px !important;
+                background:linear-gradient(180deg,rgba(19,42,58,.98),rgba(8,24,38,.98)) !important;
+                color:#fff1d0 !important;
+                font-size:.63rem !important;
+                line-height:1.15 !important;
+                font-weight:850 !important;
+                white-space:normal !important;
+            }}
+
+            {body_class} {{
+                height:100% !important;
+                max-height:100% !important;
+                overflow:hidden !important;
+                box-sizing:border-box !important;
+                backdrop-filter:blur(4px) !important;
+                -webkit-backdrop-filter:blur(4px) !important;
+            }}
+            {body_class} > div[data-testid="stVerticalBlock"] {{
+                height:100% !important;
+                max-height:100% !important;
+                min-height:0 !important;
+                overflow-y:auto !important;
+                overflow-x:hidden !important;
+                gap:.38rem !important;
+                padding:.45rem !important;
+                box-sizing:border-box !important;
+                overscroll-behavior:contain !important;
+                scrollbar-width:thin !important;
+            }}
+            {body_class} div[data-testid="stHorizontalBlock"] {{
+                gap:.42rem !important;
+            }}
+            {body_class} [data-testid="stSegmentedControl"] {{
+                position:sticky !important;
+                top:0 !important;
+                z-index:6 !important;
+                margin:0 auto .15rem !important;
+                padding:.12rem !important;
+                border:1px solid rgba(214,164,82,.55) !important;
+                border-radius:6px !important;
+                background:rgba(5,17,29,.92) !important;
+            }}
+            {body_class} [data-testid="stSegmentedControl"] button {{
+                min-width:2.25rem !important;
+                min-height:2rem !important;
+                padding:.12rem .55rem !important;
+                color:#f4e4bd !important;
+            }}
+            {body_class} [data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
+                border-color:#e0a65b !important;
+                background:#762b37 !important;
+                color:#fff2d3 !important;
+            }}
+
+            {body_class} .v3-mode-heading,
+            {body_class} .v3-panel-title {{
+                margin:0 !important;
+                color:#fff2d3 !important;
+            }}
+            {body_class} .v3-mode-heading small,
+            {body_class} .v3-panel-title small {{
+                display:none !important;
+            }}
+            {body_class} [data-testid="stImage"] img {{
+                width:100% !important;
+                max-height:43dvh !important;
+                object-fit:contain !important;
+                object-position:center bottom !important;
+            }}
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] {{
+                gap:.3rem !important;
+            }}
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] > label {{
+                min-height:3.2rem !important;
+                padding:.55rem .65rem !important;
+                border:1px solid rgba(214,164,82,.34) !important;
+                border-radius:5px !important;
+                background:rgba(9,27,41,.94) !important;
+            }}
+
+            {dock_class} {{ position:relative !important; z-index:10 !important; padding:.28rem !important; }}
+            {dock_class} > div[data-testid="stVerticalBlock"] {{ gap:0 !important; }}
+            {dock_class} div[data-testid="stHorizontalBlock"] {{
+                display:flex !important;
+                flex-wrap:nowrap !important;
+                gap:.2rem !important;
+            }}
+            {dock_class} div[data-testid="stColumn"] {{
+                flex:1 1 25% !important;
+                width:25% !important;
+                min-width:0 !important;
+            }}
+            {dock_class} div[data-testid="stButton"] > button {{
+                width:100% !important;
+                min-height:3.7rem !important;
+                height:3.7rem !important;
+                padding:.2rem .08rem !important;
+                border:1px solid rgba(188,145,76,.48) !important;
+                border-radius:4px !important;
+                background:linear-gradient(180deg,rgba(17,37,52,.98),rgba(8,24,38,.98)) !important;
+                color:#fff0cc !important;
+                font-size:.66rem !important;
+                line-height:1.22 !important;
+                font-weight:900 !important;
+                white-space:normal !important;
+            }}
+            {dock_class} div[data-testid="stButton"] > button[kind="primary"] {{
+                background:linear-gradient(145deg,#862c3a,#591e2c) !important;
+                border-color:#efab54 !important;
+                box-shadow:inset 0 0 0 1px rgba(255,215,139,.22) !important;
+            }}
+
+            .v3-review-stage,
+            .v3-review-stage.v3-review-stage-v32 {{
+                position:relative !important;
+                display:flex !important;
+                flex-direction:column !important;
+                justify-content:flex-end !important;
+                height:clamp(390px,58dvh,560px) !important;
+                min-height:390px !important;
+                max-height:560px !important;
+                border-radius:5px !important;
+                border-color:rgba(214,164,82,.66) !important;
+            }}
+            .v3-review-stage-v32 .v3-review-character-v32 {{
+                position:absolute !important;
+                left:50% !important;
+                bottom:112px !important;
+                width:min(58%,220px) !important;
+                height:52% !important;
+                transform:translateX(-50%) !important;
+            }}
+            .v3-review-stage-v32 .v3-review-dialogue-v32 {{
+                position:relative !important;
+                z-index:3 !important;
+                margin:.48rem !important;
+                min-height:104px !important;
+                padding:.66rem .72rem !important;
+                border:1px solid rgba(214,164,82,.66) !important;
+                border-radius:5px !important;
+                background:rgba(6,22,35,.96) !important;
+            }}
+            .v3-review-stage-v32 .v3-review-dialogue-v32,
+            .v3-review-stage-v32 .v3-review-dialogue-v32 * {{
+                color:#f8ead0 !important;
+                -webkit-text-fill-color:#f8ead0 !important;
+            }}
+            .v3-review-stage-v32 .v3-review-text {{
+                color:#f8ead0 !important;
+                -webkit-text-fill-color:#f8ead0 !important;
+                font-size:.92rem !important;
+                line-height:1.5 !important;
+            }}
+            .v3-review-stage-v32 .v3-review-speaker {{
+                background:#0b2539 !important;
+                border:1px solid #d49a50 !important;
+                color:#f7d889 !important;
+                -webkit-text-fill-color:#f7d889 !important;
+            }}
+            .v3-review-side-card,
+            .v3-evidence-card,
+            .v3-companion-hint-card {{
+                border-color:rgba(214,164,82,.52) !important;
+                border-radius:5px !important;
+            }}
+
+            .v3-open-book {{
+                display:block !important;
+                width:100% !important;
+                height:auto !important;
+                min-height:100% !important;
+                margin:0 !important;
+                padding:.5rem !important;
+                border:6px solid rgba(63,34,17,.88) !important;
+                outline:1px solid #c7974e !important;
+                background:#d8c29c !important;
+                color:#28231d !important;
+                overflow:visible !important;
+            }}
+            .v3-open-book, .v3-open-book * {{
+                color:#28231d !important;
+                -webkit-text-fill-color:currentColor !important;
+            }}
+            .v3-book-page {{
+                padding:1rem .9rem !important;
+                background:
+                    repeating-linear-gradient(0deg,rgba(104,78,43,.035) 0,rgba(104,78,43,.035) 1px,transparent 1px,transparent 24px),
+                    linear-gradient(100deg,#ead9b8,#f3e4c5 58%,#dfc79f) !important;
+                color:#28231d !important;
+                overflow:visible !important;
+            }}
+            .v3-book-kicker {{ font-size:.78rem !important; font-weight:950 !important; }}
+            .v3-book-page h2 {{ margin:.3rem 0 .55rem !important; font-size:1.25rem !important; }}
+            .v3-book-tabs {{ display:flex !important; gap:.3rem !important; margin-bottom:.55rem !important; }}
+            .v3-book-tabs > * {{ padding:.24rem .7rem !important; border:1px solid #9a7040 !important; border-radius:3px !important; }}
+            .v3-book-tabs b {{ background:#783239 !important; color:#fff1d0 !important; -webkit-text-fill-color:#fff1d0 !important; }}
+            .v3-book-lead, .v3-book-page p {{ font-size:.82rem !important; line-height:1.55 !important; font-weight:650 !important; }}
+            .v3-book-keywords {{ display:flex !important; flex-wrap:wrap !important; gap:.3rem !important; margin:.7rem 0 !important; }}
+            .v3-book-keywords span {{ padding:.18rem .42rem !important; border-bottom:2px solid #9c3038 !important; font-size:.7rem !important; font-weight:850 !important; }}
+            .v3-book-fact {{ margin:.7rem 0 !important; padding:.65rem !important; border-block:1px solid #8c673c !important; font-size:.95rem !important; font-weight:900 !important; }}
+            .v3-book-note {{ margin-top:.8rem !important; padding:.65rem !important; background:#dcc27b !important; box-shadow:0 3px 8px rgba(65,39,18,.22) !important; font-size:.74rem !important; font-weight:800 !important; }}
+            .v3-book-sign {{ margin-top:.8rem !important; text-align:right !important; font-size:.7rem !important; line-height:1.4 !important; font-style:italic !important; }}
+            .v3-book-left {{
+                border-right:0 !important;
+                border-bottom:1px solid rgba(91,59,29,.38) !important;
+            }}
+            .v3-book-right {{
+                box-shadow:inset 0 12px 22px rgba(80,48,23,.10) !important;
+            }}
+            .v3-book-companion {{
+                width:112px !important;
+                height:128px !important;
+                margin:-.4rem -.1rem .25rem .45rem !important;
+            }}
+        }}
+
+        @media (max-width:640px) {{
+            {body_class} div[data-testid="stHorizontalBlock"] {{
+                display:flex !important;
+                flex-direction:column !important;
+                flex-wrap:nowrap !important;
+            }}
+            {body_class} div[data-testid="stColumn"] {{
+                width:100% !important;
+                min-width:100% !important;
+            }}
+            {body_class} .v3-question-text {{
+                font-size:1.05rem !important;
+            }}
+            {body_class} .v3-evidence-object {{
+                height:94px !important;
+            }}
+            {body_class} div[data-testid="stButton"] > button {{
+                min-height:2.9rem !important;
+                font-size:.78rem !important;
+            }}
+            {header_class} div[data-testid="stHorizontalBlock"],
+            {dock_class} div[data-testid="stHorizontalBlock"] {{
+                flex-direction:row !important;
+            }}
+            {header_class} div[data-testid="stColumn"]:first-child {{
+                min-width:0 !important;
+            }}
+            {dock_class} div[data-testid="stColumn"] {{
+                width:25% !important;
+                min-width:0 !important;
+            }}
         }}
         </style>
         """,
@@ -3895,6 +4417,14 @@ def _render_post_story_mode_body(
 
     if play_mode == PLAY_MODE_COMPANION:
         _render_companion_play_mode(
+            user=user,
+            world=world,
+            chapter=chapter,
+        )
+        return
+
+    if play_mode == PLAY_MODE_NOTE:
+        _render_learning_note_mode(
             user=user,
             world=world,
             chapter=chapter,

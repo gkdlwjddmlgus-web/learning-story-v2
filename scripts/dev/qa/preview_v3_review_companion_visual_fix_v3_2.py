@@ -97,7 +97,7 @@ def main() -> int:
         'class="v3-review-stage v3-review-stage-v32"',
         'class="v3-review-dialogue v3-review-dialogue-v32"',
         'class="v3-review-character v3-review-character-v32 ',
-        'class="v3-review-scene-list-title"',
+        'st.segmented_control(',
     ):
         _assert(
             token in review_fn,

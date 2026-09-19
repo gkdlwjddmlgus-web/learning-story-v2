@@ -65,6 +65,7 @@ def main() -> int:
             "review",
             "companion",
             "quiz",
+            "note",
         ),
         "play-mode contract changed",
     )
@@ -143,6 +144,21 @@ def main() -> int:
             "quiz mode did not persist",
         )
 
+        runtime.set_play_mode(
+            world_id=7,
+            chapter_id=101,
+            mode=runtime.PLAY_MODE_NOTE,
+        )
+        _assert(
+            runtime.resolve_play_mode(
+                world_id=7,
+                chapter_id=101,
+                story_pending=False,
+            )
+            == runtime.PLAY_MODE_NOTE,
+            "note mode did not persist",
+        )
+
         other_chapter = (
             runtime.resolve_play_mode(
                 world_id=7,
@@ -217,7 +233,8 @@ def main() -> int:
     _assert(
         "PLAY_MODE_REVIEW" in learning_source
         and "PLAY_MODE_COMPANION" in learning_source
-        and "PLAY_MODE_QUIZ" in learning_source,
+        and "PLAY_MODE_QUIZ" in learning_source
+        and "PLAY_MODE_NOTE" in learning_source,
         "future Action Hub modes are not registered in learning_tab",
     )
 
@@ -234,10 +251,10 @@ def main() -> int:
             + token,
         )
 
-    print("[PASS] play-mode contract = story/review/companion/quiz")
+    print("[PASS] play-mode contract = story/review/companion/quiz/note")
     print("[PASS] pending Story force-enters story mode")
     print("[PASS] Story completion reconciles story -> quiz locally")
-    print("[PASS] review/companion/quiz persist per World + Chapter")
+    print("[PASS] review/companion/quiz/note persist per World + Chapter")
     print("[PASS] Chapter mode state is isolated from another Chapter")
     print("[PASS] World cleanup does not clear another World's state")
     print("[PASS] invalid mode is rejected")
@@ -252,10 +269,9 @@ def main() -> int:
 
     print()
     print("[SCOPE]")
-    print("- This migration establishes state ownership only.")
+    print("- Play-mode state now owns all four post-Story surfaces.")
     print("- Existing visible Story -> Quiz flow is preserved.")
-    print("- Review/Companion are registered for the next Action Hub migration.")
-    print("- No new Review/Companion button is rendered yet.")
+    print("- Review/Companion/Quiz/Note remain session-local transitions.")
 
     print()
     print("[NO CHANGE]")

@@ -7,12 +7,14 @@ PLAY_MODE_STORY = "story"
 PLAY_MODE_REVIEW = "review"
 PLAY_MODE_COMPANION = "companion"
 PLAY_MODE_QUIZ = "quiz"
+PLAY_MODE_NOTE = "note"
 
 PLAY_MODES = (
     PLAY_MODE_STORY,
     PLAY_MODE_REVIEW,
     PLAY_MODE_COMPANION,
     PLAY_MODE_QUIZ,
+    PLAY_MODE_NOTE,
 )
 
 _KEY_PREFIX = "_v3_play_mode"
@@ -77,7 +79,7 @@ def resolve_play_mode(
     # Resolve one session-local play mode without DB/AI work.
     # Pending Story always owns the screen.
     # Once Story is seen, stale story mode advances to quiz.
-    # review/companion/quiz persist for the same World/Chapter.
+    # review/companion/quiz/note persist for the same World/Chapter.
     key = get_play_mode_key(
         world_id=world_id,
         chapter_id=chapter_id,

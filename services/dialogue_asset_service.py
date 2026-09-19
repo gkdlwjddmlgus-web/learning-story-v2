@@ -152,6 +152,33 @@ def resolve_portrait(
     return _first_existing(directory, stems)
 
 
+def resolve_companion_action_portrait(
+    theme: str,
+    action: str,
+    *,
+    asset_root: str | Path | None = None,
+) -> Path | None:
+    """Resolve a mystery action pose while preserving other theme defaults."""
+    action_key = normalize_asset_key(action, fallback="default")
+    character_id = (
+        action_key
+        if normalize_theme(theme) == "mystery"
+        and action_key in {
+            "explain",
+            "investigate",
+            "thinking",
+            "notebook",
+        }
+        else "default"
+    )
+    return resolve_portrait(
+        theme,
+        "companion",
+        character_id=character_id,
+        asset_root=asset_root,
+    )
+
+
 def background_directory(
     theme: str,
     *,

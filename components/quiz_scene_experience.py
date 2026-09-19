@@ -10,6 +10,7 @@ import streamlit as st
 from components.dialogue_scene import render_dialogue_scene
 from services.dialogue_asset_service import (
     resolve_background,
+    resolve_companion_action_portrait,
     resolve_portrait,
 )
 
@@ -402,10 +403,9 @@ def render_quiz_feedback_dialogue(
     )
     beat = beats[current_index]
 
-    companion_portrait_path = resolve_portrait(
+    companion_portrait_path = resolve_companion_action_portrait(
         theme,
-        "companion",
-        character_id="default",
+        "explain" if is_correct else "thinking",
     )
     player_portrait_path = resolve_portrait(
         theme,

@@ -39,6 +39,7 @@ def main() -> int:
     _assert(
         "if play_mode == PLAY_MODE_REVIEW:" in learning_source
         and "if play_mode == PLAY_MODE_COMPANION:" in learning_source
+        and "if play_mode == PLAY_MODE_NOTE:" in learning_source
         and "if play_mode != PLAY_MODE_QUIZ:" in learning_source,
         "mode dispatch contract is incomplete",
     )
@@ -62,6 +63,12 @@ def main() -> int:
         and "st.rerun()" in hub_source,
         "Action Hub does not perform local mode transition",
     )
+    _assert(
+        "PLAY_MODE_NOTE" in hub_source
+        and "_render_learning_note_mode(" in learning_source
+        and "v3-open-book" in learning_source,
+        "full-screen Learning Note mode is incomplete",
+    )
 
     forbidden_hub = (
         "repositories",
@@ -80,11 +87,12 @@ def main() -> int:
         "Companion mode must reuse guarded quiz progress restore",
     )
 
-    print("[PASS] Action Hub exposes Review / Companion / Quiz")
+    print("[PASS] Action Hub exposes Review / Companion / Quiz / Learning Note")
     print("[PASS] Hub click path uses set_play_mode + rerun only")
     print("[PASS] Story Review reuses existing renderer with expanded presentation")
     print("[PASS] Companion reuses current-question Evidence + learning materials")
     print("[PASS] Quiz keeps existing render_quiz flow")
+    print("[PASS] Learning Note uses a local-only open-book view")
     print("[PASS] Hub component contains no repository or generation dependency")
     print()
     print("[PERFORMANCE]")
