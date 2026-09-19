@@ -204,9 +204,28 @@ def _story_runtime_layout_css() -> str:
     }
 
     @media (max-width: 768px) {
+        div[data-testid="stAppViewContainer"]:has(
+            .dialogue-story-runtime-anchor
+        ) header[data-testid="stHeader"],
+        div[data-testid="stAppViewContainer"]:has(
+            .dialogue-story-runtime-anchor
+        ) [data-testid="stToolbar"],
+        #MainMenu,
+        footer,
+        [data-testid="stDecoration"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            visibility: hidden !important;
+        }
+
         div[data-testid="stAppViewContainer"]
         .block-container:has(.dialogue-story-runtime-anchor) {
-            padding-top: 1.15rem !important;
+            /* Community Cloud keeps a small app toolbar above the canvas.
+               Reserve that safe area so the one-line controls never sit
+               underneath it, even when the toolbar cannot be hidden. */
+            padding-top: 6.35rem !important;
+            padding-bottom: .3rem !important;
         }
 
         .dialogue-story-control-spacer {
@@ -215,6 +234,36 @@ def _story_runtime_layout_css() -> str:
 
         .dialogue-story-progress-meta {
             font-size: .68rem;
+        }
+
+        [class*="st-key-dialogue_story_controls_"]
+        div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            gap: .2rem !important;
+            align-items: center !important;
+        }
+
+        [class*="st-key-dialogue_story_controls_"]
+        div[data-testid="stColumn"] {
+            min-width: 0 !important;
+        }
+
+        [class*="st-key-dialogue_story_controls_"]
+        div[data-testid="stButton"] > button {
+            min-height: 2.35rem !important;
+            padding: .2rem .22rem !important;
+            font-size: .68rem !important;
+            line-height: 1.15 !important;
+            white-space: normal !important;
+        }
+
+        [class*="st-key-dialogue_story_controls_"]
+        [data-testid="stCaptionContainer"] p,
+        [class*="st-key-dialogue_story_controls_"]
+        [data-testid="stToggle"] label p {
+            font-size: .65rem !important;
+            white-space: nowrap !important;
         }
     }
 
@@ -455,16 +504,22 @@ def render_dialogue_story_experience(
         else "다음 →"
     )
 
-    (
-        control_skip,
-        control_prev,
-        control_mid,
-        control_next,
-        control_auto,
-    ) = st.columns(
-        [1.12, 0.92, 2.45, 0.92, 1.35],
-        vertical_alignment="center",
+    controls = st.container(
+        key=f"dialogue_story_controls_{chapter_id}",
     )
+    with controls:
+        (
+            control_skip,
+            control_prev,
+            control_mid,
+            control_next,
+            control_auto,
+        ) = st.columns(
+            [1.12, 0.92, 2.45, 0.92, 1.35],
+            vertical_alignment="center",
+            gap="small",
+            wrap=False,
+        )
 
     with control_skip:
         if st.button(

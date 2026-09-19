@@ -40,7 +40,9 @@ def main() -> None:
             "grid-template-rows:auto minmax(0,1fr) auto",
             "height:100dvh !important",
             "flex:1 1 25% !important",
-            "height:clamp(390px,58dvh,560px)",
+            "height:min(100%,420px)",
+            "max-height:42% !important",
+            "-webkit-text-fill-color:#f7ead0 !important",
             "display:block !important",
             "v3-evidence-object",
             "사건 기록 문서",
@@ -64,6 +66,8 @@ def main() -> None:
             ".st-key-v3_login_submit button",
             ".st-key-v3_signup_submit button",
             "-webkit-text-fill-color:#fff !important",
+            'div[data-baseweb="tab-panel"]',
+            "position:sticky !important",
         ],
     )
     require(
@@ -90,10 +94,13 @@ def main() -> None:
     print("[PASS] Mobile shell keeps HUD/body/action dock inside 100dvh")
     print("[PASS] Mobile action dock remains a fixed four-item row")
     print("[PASS] Mobile Review and Learning Note use compact vertical surfaces")
+    print("[PASS] Mobile Review keeps character and dialogue visible together")
+    print("[PASS] Mobile Quiz and Evidence own explicit readable contrast")
     print("[PASS] Evidence uses a compact record prop instead of a duplicate scene image")
     print("[PASS] Quiz feedback uses compact dialogue layout")
     print("[PASS] Companion/player theme portraits persist after answer submission")
     print("[PASS] Login and signup primary actions have explicit contrast")
+    print("[PASS] Short mobile signup keeps its completion action reachable")
     print("[PASS] JSON diagnostics omit raw model output")
 
 

@@ -134,6 +134,19 @@ def _normalize_speaker_type(speaker_type: str) -> str:
     return value
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
+def _cached_data_uri(
+    path_text: str,
+    modified_ns: int,
+) -> str:
+    """Encode a stable local asset once instead of on every scene click."""
+    file_path = Path(path_text)
+    mime_type, _ = mimetypes.guess_type(file_path.name)
+    mime_type = mime_type or "image/png"
+    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 def _data_uri(path: str | Path | None) -> str | None:
     if not path:
         return None
@@ -142,11 +155,10 @@ def _data_uri(path: str | Path | None) -> str | None:
     if not file_path.is_file():
         return None
 
-    mime_type, _ = mimetypes.guess_type(file_path.name)
-    mime_type = mime_type or "image/png"
-
-    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
+    return _cached_data_uri(
+        str(file_path.resolve()),
+        file_path.stat().st_mtime_ns,
+    )
 
 
 def _css(theme: str) -> str:
@@ -387,6 +399,41 @@ def _css(theme: str) -> str:
         .dialogue-scene-character.npc {{ left:76%; right:auto; transform:translateX(-50%); bottom:140px; width:138px; height:195px; }}
         .dialogue-box {{ min-height:124px; padding:.76rem .86rem .82rem; }}
         .dialogue-text, .dialogue-narrator .dialogue-text {{ font-size:.98rem; line-height:1.46; }}
+    }}
+
+    @media (max-width:480px) {{
+        .dialogue-scene-stage {{
+            height:calc(100dvh - 15rem);
+            min-height:280px;
+            max-height:430px;
+            margin-top:.08rem;
+            border-radius:12px;
+        }}
+        .dialogue-scene-kicker {{ top:.5rem; left:.5rem; font-size:.58rem; }}
+        .dialogue-scene-character.companion {{
+            left:28%;
+            bottom:112px;
+            width:112px;
+            height:158px;
+        }}
+        .dialogue-scene-character.player,
+        .dialogue-scene-character.npc {{
+            left:72%;
+            bottom:112px;
+            width:112px;
+            height:158px;
+        }}
+        .dialogue-box {{
+            left:.45rem;
+            right:.45rem;
+            bottom:.42rem;
+            min-height:96px;
+            padding:.6rem .7rem .64rem;
+            border-radius:12px;
+        }}
+        .dialogue-speaker {{ margin-top:-1.25rem; font-size:.7rem; }}
+        .dialogue-text,
+        .dialogue-narrator .dialogue-text {{ font-size:.86rem; line-height:1.4; }}
     }}
 
     @media (prefers-reduced-motion: reduce) {{

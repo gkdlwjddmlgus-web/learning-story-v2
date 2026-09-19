@@ -287,6 +287,84 @@ def apply_auth_styles() -> None:
                 width:100% !important;
             }}
         }}
+
+        @media (max-width: 620px) and (max-height: 700px) {{
+            div[data-testid="stMainBlockContainer"],
+            .main .block-container {{
+                padding-top:.35rem !important;
+                padding-bottom:.35rem !important;
+            }}
+
+            .v3-auth-hero {{
+                margin-bottom:.35rem !important;
+            }}
+
+            .v3-auth-title {{
+                font-size:2rem !important;
+                line-height:1.02 !important;
+            }}
+
+            .v3-auth-subtitle {{
+                margin-top:.2rem !important;
+                font-size:.76rem !important;
+                line-height:1.25 !important;
+            }}
+
+            .st-key-v3_auth_card {{
+                padding:.38rem .62rem .48rem !important;
+            }}
+
+            .st-key-v3_auth_card [data-testid="stTabs"] {{
+                margin-bottom:.2rem !important;
+            }}
+
+            .st-key-v3_auth_card button[data-baseweb="tab"] {{
+                padding:.4rem .65rem !important;
+                font-size:.82rem !important;
+            }}
+
+            .st-key-v3_auth_card div[data-baseweb="tab-panel"] {{
+                max-height:calc(100dvh - 9.6rem) !important;
+                overflow-y:auto !important;
+                overflow-x:hidden !important;
+                padding-right:.18rem !important;
+                scrollbar-width:thin !important;
+                overscroll-behavior:contain !important;
+            }}
+
+            .st-key-v3_auth_card .stTextInput {{
+                margin:.05rem 0 .18rem !important;
+            }}
+
+            .st-key-v3_auth_card .stTextInput label {{
+                font-size:.72rem !important;
+            }}
+
+            .st-key-v3_auth_card .stTextInput input {{
+                min-height:2.35rem !important;
+                padding:.38rem .62rem !important;
+                font-size:.78rem !important;
+            }}
+
+            .st-key-v3_auth_card .st-key-v3_signup_submit {{
+                position:sticky !important;
+                bottom:0 !important;
+                z-index:5 !important;
+                padding-top:.3rem !important;
+                background:linear-gradient(180deg,transparent,rgba(9,24,45,.98) 30%) !important;
+            }}
+
+            .st-key-v3_auth_card .st-key-v3_signup_submit button,
+            .st-key-v3_auth_card .st-key-v3_login_submit button {{
+                min-height:2.55rem !important;
+                color:#fff !important;
+                -webkit-text-fill-color:#fff !important;
+            }}
+
+            .v3-auth-card-foot {{
+                display:none !important;
+            }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,

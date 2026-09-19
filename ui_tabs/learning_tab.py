@@ -4213,6 +4213,49 @@ def _inject_v3_one_screen_play_layout_css(
                 border:1px solid rgba(214,164,82,.34) !important;
                 border-radius:5px !important;
                 background:rgba(9,27,41,.94) !important;
+                color:#f7ead0 !important;
+                -webkit-text-fill-color:#f7ead0 !important;
+            }}
+            {body_class} div[data-testid="stRadio"] div[role="radiogroup"] > label p {{
+                color:#f7ead0 !important;
+                -webkit-text-fill-color:#f7ead0 !important;
+                opacity:1 !important;
+                font-weight:760 !important;
+                line-height:1.35 !important;
+            }}
+            {body_class} .v3-question-card,
+            {body_class} .v3-question-card * {{
+                color:#f8ead0 !important;
+                -webkit-text-fill-color:#f8ead0 !important;
+                opacity:1 !important;
+            }}
+            {body_class} .v3-question-card {{
+                border:1px solid rgba(214,164,82,.56) !important;
+                background:linear-gradient(145deg,rgba(6,21,34,.98),rgba(10,31,47,.96)) !important;
+            }}
+            {body_class} .v3-question-kicker {{
+                color:#f3ba65 !important;
+                -webkit-text-fill-color:#f3ba65 !important;
+            }}
+            {body_class} .v3-evidence-card {{
+                border:1px solid rgba(214,164,82,.52) !important;
+                background:linear-gradient(145deg,rgba(6,21,34,.98),rgba(10,31,47,.96)) !important;
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+            }}
+            {body_class} .v3-evidence-card,
+            {body_class} .v3-evidence-card * {{
+                color:#eef4fb !important;
+                -webkit-text-fill-color:#eef4fb !important;
+                opacity:1 !important;
+            }}
+            {body_class} .v3-evidence-kicker {{
+                color:#f06a72 !important;
+                -webkit-text-fill-color:#f06a72 !important;
+            }}
+            {body_class} .v3-evidence-task {{
+                color:#d4dfeb !important;
+                -webkit-text-fill-color:#d4dfeb !important;
             }}
 
             {dock_class} {{ position:relative !important; z-index:10 !important; padding:.28rem !important; }}
@@ -4241,6 +4284,14 @@ def _inject_v3_one_screen_play_layout_css(
                 font-weight:900 !important;
                 white-space:normal !important;
             }}
+            {dock_class} div[data-testid="stButton"] > button p {{
+                margin:0 !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+                white-space:pre-line !important;
+                color:#fff0cc !important;
+                -webkit-text-fill-color:#fff0cc !important;
+            }}
             {dock_class} div[data-testid="stButton"] > button[kind="primary"] {{
                 background:linear-gradient(145deg,#862c3a,#591e2c) !important;
                 border-color:#efab54 !important;
@@ -4253,26 +4304,28 @@ def _inject_v3_one_screen_play_layout_css(
                 display:flex !important;
                 flex-direction:column !important;
                 justify-content:flex-end !important;
-                height:clamp(390px,58dvh,560px) !important;
-                min-height:390px !important;
-                max-height:560px !important;
+                height:min(100%,420px) !important;
+                min-height:300px !important;
+                max-height:420px !important;
                 border-radius:5px !important;
                 border-color:rgba(214,164,82,.66) !important;
             }}
             .v3-review-stage-v32 .v3-review-character-v32 {{
                 position:absolute !important;
                 left:50% !important;
-                bottom:112px !important;
-                width:min(58%,220px) !important;
-                height:52% !important;
+                bottom:94px !important;
+                width:min(48%,180px) !important;
+                height:46% !important;
                 transform:translateX(-50%) !important;
             }}
             .v3-review-stage-v32 .v3-review-dialogue-v32 {{
                 position:relative !important;
                 z-index:3 !important;
-                margin:.48rem !important;
-                min-height:104px !important;
-                padding:.66rem .72rem !important;
+                margin:.35rem !important;
+                min-height:84px !important;
+                max-height:42% !important;
+                overflow-y:auto !important;
+                padding:.52rem .6rem !important;
                 border:1px solid rgba(214,164,82,.66) !important;
                 border-radius:5px !important;
                 background:rgba(6,22,35,.96) !important;
@@ -4285,8 +4338,8 @@ def _inject_v3_one_screen_play_layout_css(
             .v3-review-stage-v32 .v3-review-text {{
                 color:#f8ead0 !important;
                 -webkit-text-fill-color:#f8ead0 !important;
-                font-size:.92rem !important;
-                line-height:1.5 !important;
+                font-size:.82rem !important;
+                line-height:1.4 !important;
             }}
             .v3-review-stage-v32 .v3-review-speaker {{
                 background:#0b2539 !important;

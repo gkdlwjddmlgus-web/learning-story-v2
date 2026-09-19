@@ -28,10 +28,10 @@ def _dock_label(
     guide_name: str,
 ) -> str:
     labels = {
-        PLAY_MODE_REVIEW: "📜  사건 기록",
-        PLAY_MODE_COMPANION: f"💬  {guide_name}와 대화",
-        PLAY_MODE_QUIZ: "🔎  단서 해석",
-        PLAY_MODE_NOTE: "📜  학습 노트",
+        PLAY_MODE_REVIEW: "📜\n기록",
+        PLAY_MODE_COMPANION: "💬\n대화",
+        PLAY_MODE_QUIZ: "🔎\n문제",
+        PLAY_MODE_NOTE: "📜\n노트",
     }
     return labels[mode]
 
@@ -76,6 +76,12 @@ def render_play_action_hub(
                     else "secondary"
                 ),
                 width="stretch",
+                help={
+                    PLAY_MODE_REVIEW: "사건 기록과 스토리 다시보기",
+                    PLAY_MODE_COMPANION: f"{resolved_guide}와 대화",
+                    PLAY_MODE_QUIZ: "단서를 해석하고 문제 풀기",
+                    PLAY_MODE_NOTE: "학습 노트 열기",
+                }[mode],
             )
             if clicked and mode != active_mode:
                 set_play_mode(
